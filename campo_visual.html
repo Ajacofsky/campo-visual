@@ -1034,6 +1034,147 @@ function detectBlackSquares(imageData, w, h, cx, cy, rings) {
 }
 
 // ============================================================
+// DETECT OPEN CIRCLES (puntos vistos)
+// ============================================================
+function detectOpenCircles(imageData, w, h, cx, cy, rings) {
+  const data = imageData.data;
+  const maxR = rings.r60 * 1.1;
+  const visited = new Uint8Array(w * h);
+  const circles = [];
+
+  function brightness(x, y) {
+    if (x < 0 || x >= w || y < 0 || y >= h) return 255;
+    const i = (y * w + x) * 4;
+    return (data[i] + data[i+1] + data[i+2]) / 3;
+  }
+
+  // Find dark blobs that are HOLLOW (circles)
+  const darkMap = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      if (data[i] < 100 && data[i+1] < 100 && data[i+2] < 100) darkMap[y*w+x] = 1;
+    }
+  }
+
+  for (let y = 5; y < h-5; y++) {
+    for (let x = 5; x < w-5; x++) {
+      if (!darkMap[y*w+x] || visited[y*w+x]) continue;
+      const ddx = x-cx, ddy = y-cy;
+      if (Math.sqrt(ddx*ddx+ddy*ddy) > maxR) continue;
+
+      // BFS
+      const queue = [[x,y]];
+      visited[y*w+x] = 1;
+      const pixels = [];
+      let minX=x,maxX=x,minY=y,maxY=y;
+      while (queue.length && pixels.length < 500) {
+        const [px,py] = queue.shift();
+        pixels.push([px,py]);
+        minX=Math.min(minX,px); maxX=Math.max(maxX,px);
+        minY=Math.min(minY,py); maxY=Math.max(maxY,py);
+        for (const [nx,ny] of [[px-1,py],[px+1,py],[px,py-1],[px,py+1]]) {
+          if (nx<0||nx>=w||ny<0||ny>=h) continue;
+          if (!darkMap[ny*w+nx]||visited[ny*w+nx]) continue;
+          visited[ny*w+nx]=1;
+          queue.push([nx,ny]);
+        }
+      }
+
+      const bw = maxX-minX+1, bh = maxY-minY+1;
+      const aspect = Math.max(bw,bh)/Math.min(bw,bh);
+      const fillRatio = pixels.length / (bw*bh);
+      const scx = (minX+maxX)/2, scy = (minY+maxY)/2;
+
+      // Circle: small, hollow (low fill), roughly round
+      if (bw < 3 || bh < 3 || bw > 25 || bh > 25) continue;
+      if (aspect > 2.5) continue;
+      if (fillRatio > 0.55) continue; // solid → square, not circle
+
+      // Check interior is light (hollow)
+      const margin = Math.max(1, Math.floor(Math.min(bw,bh)*0.2));
+      let interiorLight = 0, interiorTotal = 0;
+      for (let iy=minY+margin; iy<=maxY-margin; iy++) {
+        for (let ix=minX+margin; ix<=maxX-margin; ix++) {
+          interiorTotal++;
+          if (brightness(ix,iy) > 150) interiorLight++;
+        }
+      }
+      if (interiorTotal > 0 && interiorLight/interiorTotal < 0.4) continue;
+
+      const sdx=scx-cx, sdy=scy-cy;
+      const sdist=Math.sqrt(sdx*sdx+sdy*sdy);
+      if (sdist < maxR) circles.push({x:scx, y:scy, w:bw, h:bh, dist:sdist});
+    }
+  }
+  return circles;
+}
+
+function assignAllToSectors(allSymbols, cx, cy, rings) {
+  const cells = Array.from({length:8}, ()=>Array.from({length:4}, ()=>({total:0})));
+  for (const sq of allSymbols) {
+    const dx=sq.x-cx, dy=-(sq.y-cy);
+    let angle=Math.atan2(dy,dx)*180/Math.PI;
+    if (angle<0) angle+=360;
+    let ring=-1;
+    if (sq.dist<rings.r10) ring=0;
+    else if (sq.dist<rings.r20) ring=1;
+    else if (sq.dist<rings.r30) ring=2;
+    else if (sq.dist<rings.r40) ring=3;
+    if (ring<0) continue;
+    let sector=-1;
+    for (let s=0;s<8;s++) {
+      const sa=SECTOR_ANGLES[s];
+      if (sa.start<sa.end) { if (angle>=sa.start&&angle<sa.end){sector=s;break;} }
+      else { if (angle>=sa.start||angle<sa.end){sector=s;break;} }
+    }
+    if (sector<0) continue;
+    cells[sector][ring].total++;
+  }
+  return cells;
+}
+
+function scoreCellsWithCapacity(cells, allCells) {
+  // Humphrey 120 has ~120 points across 32 cells (8 sectors x 4 rings)
+  // Distribution is not perfectly even but approximately:
+  // Ring 0 (0-10°): ~2-3 pts/sector (fewer points near center)
+  // Ring 1 (10-20°): ~4 pts/sector
+  // Ring 2 (20-30°): ~4 pts/sector  
+  // Ring 3 (30-40°): ~4 pts/sector
+  // 70% threshold means:
+  //   ring0: >=2 squares → 10°, 1 square → 5°
+  //   ring1-3: >=3 squares → 10°, 1-2 squares → 5°
+
+  const threshold70 = [2, 3, 3, 3]; // min squares for 70% per ring
+
+  for (let s=0;s<8;s++) {
+    for (let r=0;r<4;r++) {
+      const count = cells[s][r].squares.length;
+      // Also consider real detected total if available
+      const detectedTotal = allCells[s][r].total;
+      let deg = 0;
+
+      if (detectedTotal > 0) {
+        // Use real ratio if we have detected symbols
+        const pct = count / detectedTotal;
+        cells[s][r].pct = pct;
+        if (pct >= 0.70) deg = 10;
+        else if (count > 0) deg = 5;
+        else deg = 0;
+      } else {
+        // Fallback: use fixed Humphrey grid threshold
+        cells[s][r].pct = count / (threshold70[r] / 0.70);
+        if (count >= threshold70[r]) deg = 10;
+        else if (count > 0) deg = 5;
+        else deg = 0;
+      }
+      cells[s][r].deg = deg;
+    }
+  }
+  return cells;
+}
+
+// ============================================================
 // SECTOR ANALYSIS
 // ============================================================
 function assignToSectors(squares, cx, cy, rings) {
@@ -1079,27 +1220,31 @@ function assignToSectors(squares, cx, cy, rings) {
 }
 
 function scoreCells(cells, cx, cy, rings) {
-  // For each cell, estimate how many squares could fit in that arc
-  // and compute percentage
-  const ringRadii = [
-    { inner: 0,          outer: rings.r10 },
-    { inner: rings.r10,  outer: rings.r20 },
-    { inner: rings.r20,  outer: rings.r30 },
-    { inner: rings.r30,  outer: rings.r40 },
-  ];
+  // The Humphrey 120-point field has a known grid of test points.
+  // For each sector+ring cell, we know approximately how many points
+  // the Humphrey places there. We use that as the capacity denominator.
+  //
+  // The 120-point grid places points at eccentricities roughly:
+  // ring 0 (0-10°): ~3-4 points per sector
+  // ring 1 (10-20°): ~3-4 points per sector  
+  // ring 2 (20-30°): ~3-4 points per sector
+  // ring 3 (30-40°): ~3-4 points per sector
+  // Total per sector ~12-15 points, total ~120 points / 8 sectors = 15 per sector
+  //
+  // We estimate capacity dynamically: for each cell, count total detected
+  // symbols (both squares AND circles) that fall in that region.
+  // This requires passing all symbols (seen + unseen) to this function.
+  // Since we only have squares, we use a fixed expected capacity per ring:
 
-  // Estimate capacity: area of arc / avg square area
-  // Average square size ~8px
-  const avgSqArea = 64;
-  const sectorAngleRad = (45 * Math.PI / 180);
+  // Expected Humphrey 120 points per sector per ring (approximate)
+  // Based on the actual Humphrey 120 grid distribution
+  const expectedPerCell = [3, 4, 4, 4]; // ring 0-3
 
   for (let s = 0; s < 8; s++) {
     for (let r = 0; r < 4; r++) {
-      const { inner, outer } = ringRadii[r];
-      const arcArea = 0.5 * sectorAngleRad * (outer*outer - inner*inner);
-      const capacity = Math.max(1, arcArea / avgSqArea);
       const count = cells[s][r].squares.length;
-      const pct = Math.min(1, count / capacity);
+      const capacity = expectedPerCell[r];
+      const pct = count / capacity;
       cells[s][r].pct = pct;
 
       // Apply 70% rule
@@ -1130,14 +1275,17 @@ function analyzeImage() {
   // Detect rings
   const rings = detectRings(imageData, w, h, cx, cy);
 
-  // Detect black squares
+  // Detect ALL symbols (squares=unseen, circles=seen)
   const squares = detectBlackSquares(imageData, w, h, cx, cy, rings);
+  const circles = detectOpenCircles(imageData, w, h, cx, cy, rings);
+  const allSymbols = [...squares.map(s=>({...s,seen:false})), ...circles.map(c=>({...c,seen:true}))];
 
-  // Assign to sectors
+  // Assign to sectors (using all symbols for correct capacity)
   const cells = assignToSectors(squares, cx, cy, rings);
+  const allCells = assignAllToSectors(allSymbols, cx, cy, rings);
 
-  // Score
-  const scored = scoreCells(cells, cx, cy, rings);
+  // Score using real capacity from all detected symbols
+  const scored = scoreCellsWithCapacity(cells, allCells);
 
   // Store
   state.eyes[state.currentEye].sectors = { cells: scored, cx, cy, rings };
