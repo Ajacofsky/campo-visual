@@ -1,0 +1,1625 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evaluador de Campo Visual - Incapacidad Campimétrica</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg: #f0f4f8;
+    --surface: #ffffff;
+    --surface2: #e8eef5;
+    --border: #b8cfe0;
+    --accent: #0077b6;
+    --accent2: #005f92;
+    --celeste: rgba(0, 180, 216, 0.45);
+    --celeste-light: rgba(0, 100, 180, 0.25);
+    --text: #1a2636;
+    --text-muted: #4a6580;
+    --green: #0a7c57;
+    --yellow: #b45309;
+    --red: #b91c1c;
+    --mono: 'Space Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    padding: 2rem;
+  }
+
+  .grid-bg {
+    position: fixed; inset: 0; z-index: 0;
+    background-image:
+      linear-gradient(rgba(0,119,182,0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,119,182,0.06) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  .container { max-width: 1400px; margin: 0 auto; position: relative; z-index: 1; }
+
+  header {
+    text-align: center;
+    margin-bottom: 3rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  header h1 {
+    font-family: var(--mono);
+    font-size: 1.6rem;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+  }
+
+  header p {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    font-weight: 300;
+  }
+
+  .tag {
+    display: inline-block;
+    background: var(--accent2);
+    color: white;
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    padding: 2px 8px;
+    border-radius: 2px;
+    letter-spacing: 0.1em;
+    margin-top: 0.5rem;
+  }
+
+  /* Layout */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 1.5rem;
+    align-items: start;
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+  }
+
+  .panel-title {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--accent);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 1.2rem;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Upload area */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 6px;
+    padding: 2rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: 1rem;
+  }
+  .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: rgba(0,119,182,0.05); }
+  .upload-zone .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+  .upload-zone p { font-size: 0.8rem; color: var(--text-muted); }
+  .upload-zone strong { color: var(--accent); }
+
+  input[type=file] { display: none; }
+
+  /* Eye selector */
+  .eye-selector {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  .eye-btn {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text-muted);
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    transition: all 0.2s;
+  }
+  .eye-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(0,119,182,0.1);
+  }
+
+  /* FN input */
+  .fn-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  .fn-row label { font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
+  .fn-row input {
+    width: 50px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    text-align: center;
+  }
+  .fn-row span { color: var(--text-muted); font-size: 1rem; }
+
+  /* Buttons */
+  .btn {
+    width: 100%;
+    padding: 0.7rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    transition: all 0.2s;
+    margin-bottom: 0.5rem;
+  }
+  .btn-primary { background: var(--accent2); color: white; }
+  .btn-primary:hover { background: var(--accent); }
+  .btn-secondary { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Sector grid manual */
+  .sector-grid {
+    margin-top: 1rem;
+  }
+  .sector-grid-title {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+  }
+  .sector-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.7rem;
+  }
+  .sector-table th {
+    font-family: var(--mono);
+    color: var(--text-muted);
+    padding: 4px 2px;
+    text-align: center;
+    font-weight: 400;
+    font-size: 0.62rem;
+  }
+  .sector-table td {
+    padding: 2px;
+    text-align: center;
+  }
+  .sector-table td:first-child {
+    text-align: left;
+    color: var(--text-muted);
+    font-size: 0.65rem;
+    white-space: nowrap;
+    padding-right: 4px;
+  }
+  .deg-select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 2px;
+    border-radius: 3px;
+    font-size: 0.65rem;
+    width: 38px;
+    font-family: var(--mono);
+    text-align: center;
+  }
+  .deg-select.val-10 { border-color: var(--red); color: var(--red); }
+  .deg-select.val-5 { border-color: var(--yellow); color: var(--yellow); }
+  .deg-select.val-0 { border-color: var(--border); color: var(--text-muted); }
+
+  /* Canvas area */
+  .canvas-area {
+    position: relative;
+  }
+  .canvas-wrapper {
+    position: relative;
+    display: inline-block;
+    width: 100%;
+  }
+  #originalCanvas, #overlayCanvas {
+    border-radius: 6px;
+    display: block;
+  }
+  #originalCanvas {
+    width: 100%;
+    height: auto;
+    background: #f8f9fa;
+  }
+  #overlayCanvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    border-radius: 6px;
+  }
+
+  .canvas-placeholder {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    height: 400px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    gap: 0.5rem;
+  }
+  .canvas-placeholder .big-icon { font-size: 3rem; opacity: 0.3; }
+
+  /* Results */
+  .results-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-top: 1.5rem;
+  }
+
+  .result-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+  }
+  .result-card.bilateral {
+    grid-column: 1 / -1;
+    border-color: var(--accent);
+    background: rgba(0,119,182,0.05);
+  }
+  .result-card .label {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.3rem;
+  }
+  .result-card .value {
+    font-family: var(--mono);
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .result-card .sub {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.2rem;
+  }
+  .result-card.bilateral .value {
+    font-size: 2.5rem;
+    color: var(--green);
+  }
+
+  /* Steps detail */
+  .steps-detail {
+    margin-top: 1rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+  }
+  .step-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.3rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    font-size: 0.78rem;
+  }
+  .step-line:last-child { border-bottom: none; }
+  .step-line .step-label { color: var(--text-muted); }
+  .step-line .step-val { font-family: var(--mono); color: var(--text); }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+  }
+  .legend-dot {
+    width: 14px; height: 14px;
+    border-radius: 2px;
+  }
+
+  .info-box {
+    background: rgba(0,119,182,0.08);
+    border: 1px solid rgba(0,119,182,0.2);
+    border-radius: 6px;
+    padding: 0.75rem;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 1rem;
+    line-height: 1.5;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.65rem;
+    font-family: var(--mono);
+    font-weight: 700;
+  }
+  .badge-od { background: rgba(0,119,182,0.15); color: #004a7c; }
+  .badge-oi { background: rgba(10,124,87,0.15); color: #0a5c40; }
+
+  /* Sensitivity slider */
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.5rem 0;
+  }
+  .slider-row label { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; }
+  input[type=range] { flex: 1; accent-color: var(--accent); }
+  .slider-val { font-family: var(--mono); font-size: 0.75rem; color: var(--accent); min-width: 30px; }
+
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--surface2);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.75rem;
+    font-family: var(--mono);
+  }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+  .status-dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .status-dot.warn { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+
+  /* Eye data accumulator */
+  .eye-summary {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  .eye-card {
+    flex: 1;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.75rem;
+    text-align: center;
+  }
+  .eye-card .eye-label { font-family: var(--mono); font-size: 0.6rem; color: var(--text-muted); letter-spacing: 0.1em; }
+  .eye-card .eye-deg { font-family: var(--mono); font-size: 1.1rem; color: var(--accent); margin: 0.2rem 0; }
+  .eye-card .eye-pct { font-size: 0.7rem; color: var(--text-muted); }
+  .eye-card.has-data { border-color: var(--accent2); }
+
+  @media (max-width: 900px) {
+    .main-grid { grid-template-columns: 1fr; }
+    .results-grid { grid-template-columns: 1fr; }
+    .result-card.bilateral { grid-column: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<div class="container">
+  <header>
+    <h1>Evaluador de Campo Visual</h1>
+    <p>Cálculo de Incapacidad Campimétrica · Ley 24.557 / Decreto 659/96</p>
+    <span class="tag">HUMPHREY FIELD ANALYZER 120</span>
+  </header>
+
+  <div class="main-grid">
+    <!-- LEFT PANEL -->
+    <div>
+      <div class="panel">
+        <div class="panel-title">// Cargar Campo Visual</div>
+
+        <div class="eye-selector">
+          <button class="eye-btn active" onclick="setEye('OD')" id="btn-od">OD — Ojo Derecho</button>
+          <button class="eye-btn" onclick="setEye('OI')" id="btn-oi">OI — Ojo Izquierdo</button>
+        </div>
+
+        <label for="fileInput">
+          <div class="upload-zone" id="uploadZone">
+            <div class="icon">🔬</div>
+            <p><strong>Cargar imagen</strong> del CV Humphrey</p>
+            <p>PNG, JPG · escaneado o foto</p>
+          </div>
+        </label>
+        <input type="file" id="fileInput" accept="image/*" onchange="loadImage(event)">
+
+        <div class="fn-row">
+          <label>Errores Falsos NEG:</label>
+          <input type="number" id="fnNum" placeholder="0" min="0" max="99" value="0">
+          <span>/</span>
+          <input type="number" id="fnDen" placeholder="1" min="1" max="99" value="1">
+        </div>
+
+        <div class="slider-row">
+          <label>Umbral negro:</label>
+          <input type="range" id="threshSlider" min="30" max="150" value="80" oninput="updateThresh(this.value)">
+          <span class="slider-val" id="threshVal">80</span>
+        </div>
+
+        <button class="btn btn-primary" id="btnAnalyze" onclick="analyzeImage()" disabled>
+          ▶ Analizar Automáticamente
+        </button>
+        <button class="btn btn-secondary" onclick="clearCurrentEye()">
+          ✕ Limpiar este ojo
+        </button>
+
+        <div class="status-bar">
+          <div class="status-dot" id="statusDot"></div>
+          <span id="statusText">Esperando imagen...</span>
+        </div>
+      </div>
+
+      <!-- Manual sector grid -->
+      <div class="panel" style="margin-top:1rem;">
+        <div class="panel-title">// Ajuste Manual de Sectores</div>
+        <div class="sector-grid">
+          <p class="sector-grid-title">Grados no vistos por franja (0 / 5 / 10)</p>
+          <table class="sector-table" id="sectorTable">
+            <thead>
+              <tr>
+                <th>Sector</th>
+                <th>0-10°</th>
+                <th>10-20°</th>
+                <th>20-30°</th>
+                <th>30-40°</th>
+              </tr>
+            </thead>
+            <tbody id="sectorBody"></tbody>
+          </table>
+        </div>
+        <button class="btn btn-primary" style="margin-top:1rem" onclick="calculateFromManual()">
+          ⟳ Recalcular con valores manuales
+        </button>
+      </div>
+
+      <!-- Eye summary cards -->
+      <div class="panel" style="margin-top:1rem;">
+        <div class="panel-title">// Datos Acumulados</div>
+        <div class="eye-summary">
+          <div class="eye-card" id="cardOD">
+            <div class="eye-label">OD</div>
+            <div class="eye-deg" id="degOD">—</div>
+            <div class="eye-pct" id="pctOD">sin datos</div>
+          </div>
+          <div class="eye-card" id="cardOI">
+            <div class="eye-label">OI</div>
+            <div class="eye-deg" id="degOI">—</div>
+            <div class="eye-pct" id="pctOI">sin datos</div>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="calcBilateral()" id="btnBilateral" disabled>
+          ⟳ Calcular Incapacidad Bilateral
+        </button>
+      </div>
+    </div>
+
+    <!-- RIGHT PANEL -->
+    <div>
+      <div class="panel">
+        <div class="panel-title">// Visualización del Campo Visual
+          <span style="float:right; font-size:0.65rem; color:var(--text-muted)" id="eyeLabel"></span>
+        </div>
+
+        <div id="canvasPlaceholder" class="canvas-placeholder">
+          <div class="big-icon">👁</div>
+          <span>Cargá una imagen del Campo Visual Humphrey</span>
+          <span style="font-size:0.75rem">Las zonas no vistas se marcarán en celeste</span>
+        </div>
+
+        <div class="canvas-wrapper" id="canvasWrapper" style="display:none">
+          <canvas id="originalCanvas"></canvas>
+          <canvas id="overlayCanvas"></canvas>
+        </div>
+
+        <div class="legend" id="legend" style="display:none">
+          <div class="legend-item">
+            <div class="legend-dot" style="background:rgba(0,180,216,0.7)"></div>
+            <span>No visto ≥70% (10°)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot" style="background:rgba(0,180,216,0.35)"></div>
+            <span>No visto &lt;70% (5°)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot" style="background:rgba(255,255,255,0.1); border:1px solid #333"></div>
+            <span>Visto (0°)</span>
+          </div>
+        </div>
+
+        <!-- Results -->
+        <div id="resultsArea" style="display:none">
+          <div class="results-grid">
+            <div class="result-card" id="resOD" style="display:none">
+              <div class="label"><span class="badge badge-od">OD</span> Incapacidad</div>
+              <div class="value" id="resODval">—</div>
+              <div class="sub" id="resODsub"></div>
+            </div>
+            <div class="result-card" id="resOI" style="display:none">
+              <div class="label"><span class="badge badge-oi">OI</span> Incapacidad</div>
+              <div class="value" id="resOIval">—</div>
+              <div class="sub" id="resOIsub"></div>
+            </div>
+            <div class="result-card bilateral" id="resBilateral" style="display:none">
+              <div class="label">Incapacidad Campimétrica Bilateral Total</div>
+              <div class="value" id="resBilVal">—</div>
+              <div class="sub" id="resBilSub"></div>
+            </div>
+          </div>
+
+          <div class="steps-detail" id="stepsDetail"></div>
+        </div>
+
+        <div class="info-box">
+          <strong style="color:var(--accent)">Metodología:</strong> Cada ojo se divide en 8 sectores (ejes cartesianos + bisectrices). Cada sector comprende 4 franjas de 10° (0–40°). Si una franja tiene ≥70% de cuadrados negros → 10° no vistos; si &lt;70% → 5°; si ninguno → 0°. Total ÷ 320 × 100 × 0,25 = % incapacidad por ojo. Suma bilateral × 1,50. Se aplica corrección por Falsos Negativos si FN &gt; 0.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// STATE
+// ============================================================
+const state = {
+  currentEye: 'OD',
+  threshold: 80,
+  eyes: {
+    OD: { loaded: false, sectors: null, totalDeg: 0, incap: 0, fn: {n:0,d:1}, imgData: null },
+    OI: { loaded: false, sectors: null, totalDeg: 0, incap: 0, fn: {n:0,d:1}, imgData: null }
+  },
+  imgElement: null,
+  originalW: 0,
+  originalH: 0,
+};
+
+const SECTOR_NAMES = [
+  'Sup-Temporal', 'Superior', 'Sup-Nasal',
+  'Nasal', 'Inf-Nasal', 'Inferior',
+  'Inf-Temporal', 'Temporal'
+];
+
+// Angles for 8 sectors (center angle of each sector, in degrees from top, clockwise)
+// Sectors defined by their START angle (from positive X axis, CCW)
+// We'll define sectors as: 8 wedges of 45° each
+// Starting at -90° (top) going clockwise
+// Sector boundaries (from East=0°, CCW positive):
+// We use standard math angles
+const SECTOR_ANGLES = [
+  { name: 'Sup-Temporal', start: 45, end: 90 },    // upper right (temporal for OD)
+  { name: 'Superior',     start: 90, end: 135 },
+  { name: 'Sup-Nasal',    start: 135, end: 180 },
+  { name: 'Nasal',        start: 180, end: 225 },
+  { name: 'Inf-Nasal',    start: 225, end: 270 },
+  { name: 'Inferior',     start: 270, end: 315 },
+  { name: 'Inf-Temporal', start: 315, end: 360 },
+  { name: 'Temporal',     start: 0,   end: 45  },
+];
+
+function setEye(eye) {
+  state.currentEye = eye;
+  document.getElementById('btn-od').classList.toggle('active', eye === 'OD');
+  document.getElementById('btn-oi').classList.toggle('active', eye === 'OI');
+  document.getElementById('eyeLabel').textContent = eye === 'OD' ? '— Ojo Derecho' : '— Ojo Izquierdo';
+
+  // restore fn values
+  const e = state.eyes[eye];
+  document.getElementById('fnNum').value = e.fn.n;
+  document.getElementById('fnDen').value = e.fn.d;
+
+  // restore image if exists
+  if (e.imgData) {
+    restoreCanvas(e.imgData);
+    document.getElementById('btnAnalyze').disabled = false;
+    if (e.sectors) {
+      populateSectorTable(e.sectors);
+      drawOverlay(e.sectors);
+    }
+  } else {
+    document.getElementById('canvasPlaceholder').style.display = 'flex';
+    document.getElementById('canvasWrapper').style.display = 'none';
+    document.getElementById('btnAnalyze').disabled = true;
+    clearSectorTable();
+  }
+}
+
+function updateThresh(val) {
+  state.threshold = parseInt(val);
+  document.getElementById('threshVal').textContent = val;
+}
+
+// ============================================================
+// IMAGE LOADING
+// ============================================================
+function loadImage(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      state.imgElement = img;
+      state.originalW = img.width;
+      state.originalH = img.height;
+
+      // Draw to original canvas
+      const canvas = document.getElementById('originalCanvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+
+      // Setup overlay canvas
+      const overlay = document.getElementById('overlayCanvas');
+      overlay.width = img.width;
+      overlay.height = img.height;
+
+      // Store imgData
+      state.eyes[state.currentEye].imgData = e.target.result;
+      state.eyes[state.currentEye].loaded = true;
+
+      document.getElementById('canvasPlaceholder').style.display = 'none';
+      document.getElementById('canvasWrapper').style.display = 'block';
+      document.getElementById('legend').style.display = 'flex';
+      document.getElementById('btnAnalyze').disabled = false;
+      setStatus('ok', 'Imagen cargada. Listo para analizar.');
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function restoreCanvas(dataUrl) {
+  const img = new Image();
+  img.onload = () => {
+    state.imgElement = img;
+    state.originalW = img.width;
+    state.originalH = img.height;
+    const canvas = document.getElementById('originalCanvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const overlay = document.getElementById('overlayCanvas');
+    overlay.width = img.width;
+    overlay.height = img.height;
+    document.getElementById('canvasPlaceholder').style.display = 'none';
+    document.getElementById('canvasWrapper').style.display = 'block';
+    document.getElementById('legend').style.display = 'flex';
+  };
+  img.src = dataUrl;
+}
+
+// ============================================================
+// CENTER & RING DETECTION
+// ============================================================
+function detectCenter(imageData, w, h) {
+  // Find the intersection of the two main axes
+  // Strategy: look for long horizontal and vertical dark lines
+  const data = imageData.data;
+
+  function isDark(x, y) {
+    const i = (y * w + x) * 4;
+    return data[i] < 80 && data[i+1] < 80 && data[i+2] < 80;
+  }
+
+  // Score each row for horizontal dark pixels (axis line)
+  let bestRowScore = 0, bestRow = Math.floor(h * 0.45);
+  for (let y = Math.floor(h*0.3); y < Math.floor(h*0.7); y++) {
+    let score = 0;
+    for (let x = Math.floor(w*0.1); x < Math.floor(w*0.9); x++) {
+      if (isDark(x, y)) score++;
+    }
+    if (score > bestRowScore) { bestRowScore = score; bestRow = y; }
+  }
+
+  // Score each col for vertical dark pixels
+  let bestColScore = 0, bestCol = Math.floor(w * 0.45);
+  for (let x = Math.floor(w*0.2); x < Math.floor(w*0.8); x++) {
+    let score = 0;
+    for (let y = Math.floor(h*0.1); y < Math.floor(h*0.9); y++) {
+      if (isDark(x, y)) score++;
+    }
+    if (score > bestColScore) { bestColScore = score; bestCol = x; }
+  }
+
+  return { cx: bestCol, cy: bestRow };
+}
+
+function detectRings(imageData, w, h, cx, cy) {
+  const data = imageData.data;
+
+  // Strategy: find the outermost boundary of the field (r60)
+  // by scanning outward from center in many directions and finding
+  // the last dark pixel before the field ends.
+  // Then divide r60 / 6 to get r10, r20, r30, r40, r50, r60.
+  // This is the most robust approach because r60 is always clearly visible
+  // as the outer boundary of the printed circle.
+
+  function brightnessAt(x, y) {
+    if (x < 0 || x >= w || y < 0 || y >= h) return 255;
+    const i = (y * w + x) * 4;
+    return (data[i] + data[i+1] + data[i+2]) / 3;
+  }
+
+  // Scan outward in 16 directions, find where field boundary is
+  const numAngles = 16;
+  const outerRadii = [];
+
+  for (let a = 0; a < numAngles; a++) {
+    const angleDeg = (a / numAngles) * 360;
+    const rad = angleDeg * Math.PI / 180;
+    const dx = Math.cos(rad);
+    const dy = Math.sin(rad);
+    const maxDist = Math.min(w, h) * 0.6;
+
+    // Find the outermost dark transition (boundary of printed circle)
+    let lastDarkAt = 0;
+    let prev = false;
+
+    for (let d = 10; d < maxDist; d++) {
+      const x = Math.round(cx + dx * d);
+      const y = Math.round(cy + dy * d);
+      const bright = brightnessAt(x, y);
+      const dark = bright < 110;
+
+      if (dark) lastDarkAt = d;
+
+      // After going far enough into white space, stop
+      if (d > 40 && !dark && prev && lastDarkAt > 0) {
+        // Check if we are now in white/light territory for several pixels
+        let allLight = true;
+        for (let dd = d; dd < Math.min(d+15, maxDist); dd++) {
+          const xx = Math.round(cx + dx * dd);
+          const yy = Math.round(cy + dy * dd);
+          if (brightnessAt(xx, yy) < 150) { allLight = false; break; }
+        }
+        if (allLight) break;
+      }
+      prev = dark;
+    }
+
+    if (lastDarkAt > 20) outerRadii.push(lastDarkAt);
+  }
+
+  // Use median of outer radii as r60
+  outerRadii.sort((a,b) => a-b);
+  let r60;
+  if (outerRadii.length > 0) {
+    // Use 75th percentile to avoid catching inner rings
+    const idx = Math.floor(outerRadii.length * 0.75);
+    r60 = outerRadii[idx];
+  } else {
+    r60 = Math.min(w, h) * 0.42;
+  }
+
+  // Now try to find the inner rings more precisely
+  // Sample along horizontal axis (both sides) looking for ring lines
+  const horizontalTransitions = [];
+  for (const side of [1, -1]) {
+    let prev2 = false;
+    for (let d = 5; d < r60 * 1.1; d++) {
+      const x = Math.round(cx + side * d);
+      const y = cy;
+      const dark = brightnessAt(x, y) < 110;
+      if (dark && !prev2) horizontalTransitions.push(d);
+      prev2 = dark;
+    }
+  }
+
+  // Also vertical
+  for (const side of [1, -1]) {
+    let prev2 = false;
+    for (let d = 5; d < r60 * 1.1; d++) {
+      const x = cx;
+      const y = Math.round(cy + side * d);
+      const dark = brightnessAt(x, y) < 110;
+      if (dark && !prev2) horizontalTransitions.push(d);
+      prev2 = dark;
+    }
+  }
+
+  horizontalTransitions.sort((a,b) => a-b);
+
+  // Cluster
+  const clusters = [];
+  for (const d of horizontalTransitions) {
+    if (d > r60 * 1.05) continue; // ignore beyond field
+    const last = clusters[clusters.length-1];
+    if (!last || d - last[last.length-1] > 10) {
+      clusters.push([d]);
+    } else {
+      last.push(d);
+    }
+  }
+
+  const candidateRings = clusters
+    .filter(c => c.length >= 2)
+    .map(c => c.reduce((a,b)=>a+b,0)/c.length)
+    .filter(r => r < r60 * 0.98)
+    .sort((a,b)=>a-b);
+
+  // We need r10, r20, r30, r40
+  // Best case: found 5+ rings → use them
+  // Otherwise: divide r60 by 6 geometrically
+  const unit = r60 / 6;
+
+  if (candidateRings.length >= 4) {
+    // Validate: rings should be roughly equidistant
+    // Check if spacing is consistent (each ~unit apart)
+    const r10c = candidateRings[0];
+    const spacing = r60 / 6;
+    // If first ring is close to expected r10
+    if (Math.abs(r10c - spacing) < spacing * 0.5) {
+      return {
+        r10: candidateRings[0],
+        r20: candidateRings[1],
+        r30: candidateRings[2],
+        r40: candidateRings[3],
+        r50: candidateRings[4] || unit * 5,
+        r60: r60,
+      };
+    }
+  }
+
+  // Geometric fallback: divide r60 equally into 6 parts
+  // This is always correct since the Humphrey CV has equidistant rings
+  return {
+    r10: unit,
+    r20: unit * 2,
+    r30: unit * 3,
+    r40: unit * 4,
+    r50: unit * 5,
+    r60: r60,
+  };
+}
+
+// ============================================================
+// SQUARE DETECTION (mejorado: discrimina cuadrados de círculos)
+// ============================================================
+function detectBlackSquares(imageData, w, h, cx, cy, rings) {
+  const data = imageData.data;
+  const thresh = state.threshold;
+  const maxR = rings.r60 * 1.1;
+
+  // Helper: get brightness at pixel
+  function brightness(x, y) {
+    if (x < 0 || x >= w || y < 0 || y >= h) return 255;
+    const i = (y * w + x) * 4;
+    return (data[i] + data[i+1] + data[i+2]) / 3;
+  }
+
+  function isDark(x, y) {
+    return brightness(x, y) < thresh;
+  }
+
+  // Create binary map of dark pixels
+  const dark = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const r = data[i], g = data[i+1], b = data[i+2];
+      if (r < thresh && g < thresh && b < thresh) {
+        dark[y * w + x] = 1;
+      }
+    }
+  }
+
+  const visited = new Uint8Array(w * h);
+  const squares = [];
+
+  for (let y = 10; y < h - 10; y++) {
+    for (let x = 10; x < w - 10; x++) {
+      if (!dark[y * w + x] || visited[y * w + x]) continue;
+
+      const dx0 = x - cx, dy0 = y - cy;
+      const dist0 = Math.sqrt(dx0*dx0 + dy0*dy0);
+      if (dist0 > maxR) continue;
+
+      // BFS flood fill to get blob
+      const queue = [[x, y]];
+      visited[y * w + x] = 1;
+      const pixels = [];
+      let minX = x, maxX = x, minY = y, maxY = y;
+
+      while (queue.length > 0 && pixels.length < 3000) {
+        const [px, py] = queue.shift();
+        pixels.push([px, py]);
+        minX = Math.min(minX, px); maxX = Math.max(maxX, px);
+        minY = Math.min(minY, py); maxY = Math.max(maxY, py);
+
+        const neighbors = [[px-1,py],[px+1,py],[px,py-1],[px,py+1]];
+        for (const [nx, ny] of neighbors) {
+          if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+          if (!dark[ny * w + nx] || visited[ny * w + nx]) continue;
+          visited[ny * w + nx] = 1;
+          queue.push([nx, ny]);
+        }
+      }
+
+      const blobW = maxX - minX + 1;
+      const blobH = maxY - minY + 1;
+      const bboxArea = blobW * blobH;
+      const pixelCount = pixels.length;
+      const fillRatio = pixelCount / bboxArea;
+      const aspect = Math.max(blobW, blobH) / Math.min(blobW, blobH);
+      const scx = (minX + maxX) / 2;
+      const scy = (minY + maxY) / 2;
+
+      // ---- CRITERIOS PARA CUADRADO NEGRO ----
+      // 1. Tamaño razonable para un símbolo del CV Humphrey
+      if (blobW < 4 || blobH < 4) continue;
+      if (blobW > 40 || blobH > 40) continue;
+
+      // 2. Aspecto cuadrado (no muy elongado)
+      if (aspect > 2.2) continue;
+
+      // 3. Fill ratio alto → objeto SÓLIDO (cuadrado relleno)
+      //    Un círculo visto es HUECO → fill bajo
+      //    Un cuadrado negro es SÓLIDO → fill alto
+      if (fillRatio < 0.60) continue;
+
+      // 4. Verificar que el INTERIOR del bounding box sea mayormente oscuro
+      //    (distingue círculo hueco de cuadrado sólido)
+      let interiorDark = 0, interiorTotal = 0;
+      const margin = Math.max(1, Math.floor(Math.min(blobW, blobH) * 0.25));
+      for (let iy = minY + margin; iy <= maxY - margin; iy++) {
+        for (let ix = minX + margin; ix <= maxX - margin; ix++) {
+          interiorTotal++;
+          if (isDark(ix, iy)) interiorDark++;
+        }
+      }
+      // Si el interior tiene muchos píxeles claros → es un círculo hueco
+      if (interiorTotal > 0 && (interiorDark / interiorTotal) < 0.55) continue;
+
+      // 5. Verificar que NO sea simplemente el borde de un círculo
+      //    Los bordes de círculos son delgados → blobW o blobH muy pequeño relativo a su arco
+      //    Si es muy delgado en una dimensión pero largo → es un arco, no un cuadrado
+      const minDim = Math.min(blobW, blobH);
+      const maxDim = Math.max(blobW, blobH);
+      if (minDim < 4 && maxDim > 15) continue; // arco delgado
+
+      // 6. Distancia al centro válida
+      const sdx = scx - cx, sdy = scy - cy;
+      const sdist = Math.sqrt(sdx*sdx + sdy*sdy);
+      if (sdist > maxR * 1.05) continue;
+
+      squares.push({ x: scx, y: scy, w: blobW, h: blobH, dist: sdist, fill: fillRatio });
+    }
+  }
+
+  return squares;
+}
+
+// ============================================================
+// DETECT OPEN CIRCLES (puntos vistos)
+// ============================================================
+function detectOpenCircles(imageData, w, h, cx, cy, rings) {
+  const data = imageData.data;
+  const maxR = rings.r60 * 1.1;
+  const visited = new Uint8Array(w * h);
+  const circles = [];
+
+  function brightness(x, y) {
+    if (x < 0 || x >= w || y < 0 || y >= h) return 255;
+    const i = (y * w + x) * 4;
+    return (data[i] + data[i+1] + data[i+2]) / 3;
+  }
+
+  // Find dark blobs that are HOLLOW (circles)
+  const darkMap = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      if (data[i] < 100 && data[i+1] < 100 && data[i+2] < 100) darkMap[y*w+x] = 1;
+    }
+  }
+
+  for (let y = 5; y < h-5; y++) {
+    for (let x = 5; x < w-5; x++) {
+      if (!darkMap[y*w+x] || visited[y*w+x]) continue;
+      const ddx = x-cx, ddy = y-cy;
+      if (Math.sqrt(ddx*ddx+ddy*ddy) > maxR) continue;
+
+      // BFS
+      const queue = [[x,y]];
+      visited[y*w+x] = 1;
+      const pixels = [];
+      let minX=x,maxX=x,minY=y,maxY=y;
+      while (queue.length && pixels.length < 500) {
+        const [px,py] = queue.shift();
+        pixels.push([px,py]);
+        minX=Math.min(minX,px); maxX=Math.max(maxX,px);
+        minY=Math.min(minY,py); maxY=Math.max(maxY,py);
+        for (const [nx,ny] of [[px-1,py],[px+1,py],[px,py-1],[px,py+1]]) {
+          if (nx<0||nx>=w||ny<0||ny>=h) continue;
+          if (!darkMap[ny*w+nx]||visited[ny*w+nx]) continue;
+          visited[ny*w+nx]=1;
+          queue.push([nx,ny]);
+        }
+      }
+
+      const bw = maxX-minX+1, bh = maxY-minY+1;
+      const aspect = Math.max(bw,bh)/Math.min(bw,bh);
+      const fillRatio = pixels.length / (bw*bh);
+      const scx = (minX+maxX)/2, scy = (minY+maxY)/2;
+
+      // Circle: small, hollow (low fill), roughly round
+      if (bw < 3 || bh < 3 || bw > 25 || bh > 25) continue;
+      if (aspect > 2.5) continue;
+      if (fillRatio > 0.55) continue; // solid → square, not circle
+
+      // Check interior is light (hollow)
+      const margin = Math.max(1, Math.floor(Math.min(bw,bh)*0.2));
+      let interiorLight = 0, interiorTotal = 0;
+      for (let iy=minY+margin; iy<=maxY-margin; iy++) {
+        for (let ix=minX+margin; ix<=maxX-margin; ix++) {
+          interiorTotal++;
+          if (brightness(ix,iy) > 150) interiorLight++;
+        }
+      }
+      if (interiorTotal > 0 && interiorLight/interiorTotal < 0.4) continue;
+
+      const sdx=scx-cx, sdy=scy-cy;
+      const sdist=Math.sqrt(sdx*sdx+sdy*sdy);
+      if (sdist < maxR) circles.push({x:scx, y:scy, w:bw, h:bh, dist:sdist});
+    }
+  }
+  return circles;
+}
+
+function assignAllToSectors(allSymbols, cx, cy, rings) {
+  const cells = Array.from({length:8}, ()=>Array.from({length:4}, ()=>({total:0})));
+  for (const sq of allSymbols) {
+    const dx=sq.x-cx, dy=-(sq.y-cy);
+    let angle=Math.atan2(dy,dx)*180/Math.PI;
+    if (angle<0) angle+=360;
+    let ring=-1;
+    if (sq.dist<rings.r10) ring=0;
+    else if (sq.dist<rings.r20) ring=1;
+    else if (sq.dist<rings.r30) ring=2;
+    else if (sq.dist<rings.r40) ring=3;
+    if (ring<0) continue;
+    let sector=-1;
+    for (let s=0;s<8;s++) {
+      const sa=SECTOR_ANGLES[s];
+      if (sa.start<sa.end) { if (angle>=sa.start&&angle<sa.end){sector=s;break;} }
+      else { if (angle>=sa.start||angle<sa.end){sector=s;break;} }
+    }
+    if (sector<0) continue;
+    cells[sector][ring].total++;
+  }
+  return cells;
+}
+
+function scoreCellsWithCapacity(cells, allCells) {
+  // Humphrey 120 has ~120 points across 32 cells (8 sectors x 4 rings)
+  // Distribution is not perfectly even but approximately:
+  // Ring 0 (0-10°): ~2-3 pts/sector (fewer points near center)
+  // Ring 1 (10-20°): ~4 pts/sector
+  // Ring 2 (20-30°): ~4 pts/sector  
+  // Ring 3 (30-40°): ~4 pts/sector
+  // 70% threshold means:
+  //   ring0: >=2 squares → 10°, 1 square → 5°
+  //   ring1-3: >=3 squares → 10°, 1-2 squares → 5°
+
+  const threshold70 = [2, 3, 3, 3]; // min squares for 70% per ring
+
+  for (let s=0;s<8;s++) {
+    for (let r=0;r<4;r++) {
+      const count = cells[s][r].squares.length;
+      // Also consider real detected total if available
+      const detectedTotal = allCells[s][r].total;
+      let deg = 0;
+
+      if (detectedTotal > 0) {
+        // Use real ratio if we have detected symbols
+        const pct = count / detectedTotal;
+        cells[s][r].pct = pct;
+        if (pct >= 0.70) deg = 10;
+        else if (count > 0) deg = 5;
+        else deg = 0;
+      } else {
+        // Fallback: use fixed Humphrey grid threshold
+        cells[s][r].pct = count / (threshold70[r] / 0.70);
+        if (count >= threshold70[r]) deg = 10;
+        else if (count > 0) deg = 5;
+        else deg = 0;
+      }
+      cells[s][r].deg = deg;
+    }
+  }
+  return cells;
+}
+
+// ============================================================
+// SECTOR ANALYSIS
+// ============================================================
+function assignToSectors(squares, cx, cy, rings) {
+  // 8 sectors × 4 rings = 32 cells
+  // Each cell: { count: 0, capacity: estimated_max }
+  const cells = Array.from({length: 8}, () =>
+    Array.from({length: 4}, () => ({ squares: [], pct: 0, deg: 0 }))
+  );
+
+  for (const sq of squares) {
+    const dx = sq.x - cx;
+    const dy = -(sq.y - cy); // flip Y for math convention
+
+    // Angle in degrees (0° = right/East, CCW)
+    let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    if (angle < 0) angle += 360;
+
+    // Ring index
+    let ring = -1;
+    if (sq.dist < rings.r10) ring = 0;
+    else if (sq.dist < rings.r20) ring = 1;
+    else if (sq.dist < rings.r30) ring = 2;
+    else if (sq.dist < rings.r40) ring = 3;
+    // beyond 40° not counted
+
+    if (ring < 0) continue;
+
+    // Sector index
+    let sector = -1;
+    for (let s = 0; s < 8; s++) {
+      const sa = SECTOR_ANGLES[s];
+      if (sa.start < sa.end) {
+        if (angle >= sa.start && angle < sa.end) { sector = s; break; }
+      } else { // wraps around 0
+        if (angle >= sa.start || angle < sa.end) { sector = s; break; }
+      }
+    }
+    if (sector < 0) continue;
+    cells[sector][ring].squares.push(sq);
+  }
+
+  return cells;
+}
+
+function scoreCells(cells, cx, cy, rings) {
+  // The Humphrey 120-point field has a known grid of test points.
+  // For each sector+ring cell, we know approximately how many points
+  // the Humphrey places there. We use that as the capacity denominator.
+  //
+  // The 120-point grid places points at eccentricities roughly:
+  // ring 0 (0-10°): ~3-4 points per sector
+  // ring 1 (10-20°): ~3-4 points per sector  
+  // ring 2 (20-30°): ~3-4 points per sector
+  // ring 3 (30-40°): ~3-4 points per sector
+  // Total per sector ~12-15 points, total ~120 points / 8 sectors = 15 per sector
+  //
+  // We estimate capacity dynamically: for each cell, count total detected
+  // symbols (both squares AND circles) that fall in that region.
+  // This requires passing all symbols (seen + unseen) to this function.
+  // Since we only have squares, we use a fixed expected capacity per ring:
+
+  // Expected Humphrey 120 points per sector per ring (approximate)
+  // Based on the actual Humphrey 120 grid distribution
+  const expectedPerCell = [3, 4, 4, 4]; // ring 0-3
+
+  for (let s = 0; s < 8; s++) {
+    for (let r = 0; r < 4; r++) {
+      const count = cells[s][r].squares.length;
+      const capacity = expectedPerCell[r];
+      const pct = count / capacity;
+      cells[s][r].pct = pct;
+
+      // Apply 70% rule
+      if (pct >= 0.70) cells[s][r].deg = 10;
+      else if (pct > 0) cells[s][r].deg = 5;
+      else cells[s][r].deg = 0;
+    }
+  }
+
+  return cells;
+}
+
+// ============================================================
+// MAIN ANALYSIS
+// ============================================================
+function analyzeImage() {
+  if (!state.imgElement) return;
+  setStatus('warn', 'Analizando...');
+
+  const canvas = document.getElementById('originalCanvas');
+  const ctx = canvas.getContext('2d');
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const w = canvas.width, h = canvas.height;
+
+  // Detect center
+  const { cx, cy } = detectCenter(imageData, w, h);
+
+  // Detect rings
+  const rings = detectRings(imageData, w, h, cx, cy);
+
+  // Detect ALL symbols (squares=unseen, circles=seen)
+  const squares = detectBlackSquares(imageData, w, h, cx, cy, rings);
+  const circles = detectOpenCircles(imageData, w, h, cx, cy, rings);
+  const allSymbols = [...squares.map(s=>({...s,seen:false})), ...circles.map(c=>({...c,seen:true}))];
+
+  // Assign to sectors (using all symbols for correct capacity)
+  const cells = assignToSectors(squares, cx, cy, rings);
+  const allCells = assignAllToSectors(allSymbols, cx, cy, rings);
+
+  // Score using real capacity from all detected symbols
+  const scored = scoreCellsWithCapacity(cells, allCells);
+
+  // Store
+  state.eyes[state.currentEye].sectors = { cells: scored, cx, cy, rings };
+
+  // Populate table
+  populateSectorTable(scored);
+
+  // Draw overlay
+  drawOverlay({ cells: scored, cx, cy, rings });
+
+  // Calculate
+  calculateFromSectors(scored);
+
+  setStatus('ok', `Detectados ${squares.length} puntos no vistos. Centro: (${cx}, ${cy})`);
+}
+
+// ============================================================
+// OVERLAY DRAWING
+// ============================================================
+function drawOverlay(sectorData) {
+  const { cells, cx, cy, rings } = sectorData;
+  const overlay = document.getElementById('overlayCanvas');
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+  const ringRadii = [
+    { inner: 0,          outer: rings.r10 },
+    { inner: rings.r10,  outer: rings.r20 },
+    { inner: rings.r20,  outer: rings.r30 },
+    { inner: rings.r30,  outer: rings.r40 },
+  ];
+
+  for (let s = 0; s < 8; s++) {
+    const sa = SECTOR_ANGLES[s];
+    const startRad = (sa.start) * Math.PI / 180;
+    const endRad = (sa.end) * Math.PI / 180;
+
+    // Handle wrap-around for temporal sector
+    const sStart = sa.start === 0 && sa.end === 45
+      ? 0 * Math.PI / 180
+      : startRad;
+    const sEnd = sa.start === 0 && sa.end === 45
+      ? 45 * Math.PI / 180
+      : endRad;
+
+    for (let r = 0; r < 4; r++) {
+      const cell = cells[s][r];
+      if (cell.deg === 0) continue;
+
+      const { inner, outer } = ringRadii[r];
+      const alpha = cell.deg === 10 ? 0.55 : 0.25;
+
+      ctx.beginPath();
+      // Canvas angles: 0° = right, clockwise (flip Y axis)
+      // Our angles: 0° = right, CCW → negate for canvas
+      const canvasStart = -sEnd;
+      const canvasEnd = -sStart;
+
+      if (inner === 0) {
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, outer, canvasStart, canvasEnd);
+        ctx.closePath();
+      } else {
+        ctx.arc(cx, cy, outer, canvasStart, canvasEnd);
+        ctx.arc(cx, cy, inner, canvasEnd, canvasStart, true);
+        ctx.closePath();
+      }
+
+      ctx.fillStyle = `rgba(0, 100, 180, ${alpha})`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(0, 100, 180, ${alpha * 0.5})`;
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
+  }
+
+  // Draw detected center
+  ctx.beginPath();
+  ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(220, 100, 0, 0.9)";
+  ctx.fill();
+
+  // Draw ring boundaries (subtle)
+  [rings.r10, rings.r20, rings.r30, rings.r40].forEach(r => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(0, 100, 180, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  });
+}
+
+// ============================================================
+// SECTOR TABLE
+// ============================================================
+function populateSectorTable(sectorData) {
+  const cells = sectorData.cells || sectorData;
+  const tbody = document.getElementById('sectorBody');
+  tbody.innerHTML = '';
+
+  for (let s = 0; s < 8; s++) {
+    const row = document.createElement('tr');
+    const nameCell = document.createElement('td');
+    nameCell.textContent = SECTOR_NAMES[s];
+    row.appendChild(nameCell);
+
+    for (let r = 0; r < 4; r++) {
+      const td = document.createElement('td');
+      const sel = document.createElement('select');
+      sel.className = 'deg-select';
+      sel.dataset.sector = s;
+      sel.dataset.ring = r;
+      [0, 5, 10].forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v;
+        if (cells[s][r].deg === v) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.onchange = (e) => {
+        const deg = parseInt(e.target.value);
+        e.target.className = 'deg-select ' + (deg === 10 ? 'val-10' : deg === 5 ? 'val-5' : 'val-0');
+      };
+      sel.className = 'deg-select ' + (cells[s][r].deg === 10 ? 'val-10' : cells[s][r].deg === 5 ? 'val-5' : 'val-0');
+      td.appendChild(sel);
+      row.appendChild(td);
+    }
+    tbody.appendChild(row);
+  }
+}
+
+function clearSectorTable() {
+  const tbody = document.getElementById('sectorBody');
+  tbody.innerHTML = '';
+  for (let s = 0; s < 8; s++) {
+    const row = document.createElement('tr');
+    const nameCell = document.createElement('td');
+    nameCell.textContent = SECTOR_NAMES[s];
+    row.appendChild(nameCell);
+    for (let r = 0; r < 4; r++) {
+      const td = document.createElement('td');
+      const sel = document.createElement('select');
+      sel.className = 'deg-select val-0';
+      sel.dataset.sector = s;
+      sel.dataset.ring = r;
+      [0, 5, 10].forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v;
+        if (v === 0) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.onchange = (e) => {
+        const deg = parseInt(e.target.value);
+        e.target.className = 'deg-select ' + (deg === 10 ? 'val-10' : deg === 5 ? 'val-5' : 'val-0');
+      };
+      td.appendChild(sel);
+      row.appendChild(td);
+    }
+    tbody.appendChild(row);
+  }
+}
+
+// Initialize empty table on load
+clearSectorTable();
+
+// ============================================================
+// CALCULATIONS
+// ============================================================
+function calculateFromManual() {
+  const selects = document.querySelectorAll('#sectorBody .deg-select');
+  // Reconstruct cells
+  const cells = Array.from({length:8}, () => Array.from({length:4}, () => ({deg:0})));
+  selects.forEach(sel => {
+    const s = parseInt(sel.dataset.sector);
+    const r = parseInt(sel.dataset.ring);
+    cells[s][r].deg = parseInt(sel.value);
+  });
+
+  // Update overlay if we have sector data
+  if (state.eyes[state.currentEye].sectors) {
+    state.eyes[state.currentEye].sectors.cells = cells;
+    drawOverlay(state.eyes[state.currentEye].sectors);
+  }
+
+  calculateFromSectors(cells);
+}
+
+function calculateFromSectors(cellsOrObj) {
+  const cells = cellsOrObj.cells || cellsOrObj;
+
+  // Sum degrees
+  let totalDeg = 0;
+  for (let s = 0; s < 8; s++)
+    for (let r = 0; r < 4; r++)
+      totalDeg += cells[s][r].deg;
+
+  // FN correction
+  const fnN = parseInt(document.getElementById('fnNum').value) || 0;
+  const fnD = parseInt(document.getElementById('fnDen').value) || 1;
+  state.eyes[state.currentEye].fn = { n: fnN, d: fnD };
+
+  let correctedDeg = totalDeg;
+  let fnApplied = false;
+  if (fnN > 0) {
+    correctedDeg = totalDeg * (fnN / fnD);
+    fnApplied = true;
+  }
+  correctedDeg = Math.round(correctedDeg);
+
+  // Incapacity
+  const pctLoss = correctedDeg / 320 * 100;
+  const incap = Math.round(pctLoss * 0.25);
+
+  state.eyes[state.currentEye].totalDeg = correctedDeg;
+  state.eyes[state.currentEye].incap = incap;
+  state.eyes[state.currentEye].rawDeg = totalDeg;
+
+  // Update eye summary cards
+  updateEyeCard(state.currentEye, correctedDeg, incap);
+
+  // Show this eye's result
+  showEyeResult(state.currentEye, totalDeg, correctedDeg, fnApplied, fnN, fnD, pctLoss, incap);
+
+  // Check if both eyes have data
+  const odHas = state.eyes.OD.incap > 0 || state.eyes.OD.totalDeg > 0;
+  const oiHas = state.eyes.OI.incap > 0 || state.eyes.OI.totalDeg > 0;
+  document.getElementById('btnBilateral').disabled = !(odHas && oiHas);
+
+  document.getElementById('resultsArea').style.display = 'block';
+}
+
+function showEyeResult(eye, rawDeg, corrDeg, fnApplied, fnN, fnD, pctLoss, incap) {
+  const isOD = eye === 'OD';
+  const card = document.getElementById(isOD ? 'resOD' : 'resOI');
+  const val = document.getElementById(isOD ? 'resODval' : 'resOIval');
+  const sub = document.getElementById(isOD ? 'resODsub' : 'resOIsub');
+
+  card.style.display = 'block';
+  val.textContent = incap + '%';
+  sub.textContent = `${corrDeg}° no vistos · ${pctLoss.toFixed(1)}% pérdida campimétrica`;
+
+  // Steps detail
+  let steps = `<div class="step-line"><span class="step-label">Ojo analizado</span><span class="step-val">${eye}</span></div>`;
+  steps += `<div class="step-line"><span class="step-label">Grados no vistos (bruto)</span><span class="step-val">${rawDeg}°</span></div>`;
+  if (fnApplied) {
+    steps += `<div class="step-line"><span class="step-label">Corrección FN (${fnN}/${fnD})</span><span class="step-val">${rawDeg} × ${fnN}/${fnD} = ${corrDeg}°</span></div>`;
+  }
+  steps += `<div class="step-line"><span class="step-label">Porcentaje pérdida</span><span class="step-val">${corrDeg} / 320 × 100 = ${pctLoss.toFixed(2)}%</span></div>`;
+  steps += `<div class="step-line"><span class="step-label">× Índice conversión (0,25)</span><span class="step-val">${pctLoss.toFixed(2)} × 0,25 = ${(pctLoss*0.25).toFixed(2)}% → <strong>${incap}%</strong></span></div>`;
+
+  document.getElementById('stepsDetail').innerHTML = steps;
+}
+
+function updateEyeCard(eye, deg, incap) {
+  const card = document.getElementById('card' + eye);
+  const degEl = document.getElementById('deg' + eye);
+  const pctEl = document.getElementById('pct' + eye);
+  card.classList.add('has-data');
+  degEl.textContent = deg + '°';
+  pctEl.textContent = incap + '% incapacidad';
+}
+
+function calcBilateral() {
+  const od = state.eyes.OD.incap;
+  const oi = state.eyes.OI.incap;
+  const sum = od + oi;
+  const bilateral = Math.round(sum * 1.5);
+
+  const card = document.getElementById('resBilateral');
+  const val = document.getElementById('resBilVal');
+  const sub = document.getElementById('resBilSub');
+
+  card.style.display = 'block';
+  val.textContent = bilateral + '%';
+  sub.textContent = `(${od}% OD + ${oi}% OI) × 1,50 = ${bilateral}%`;
+
+  // Add to steps
+  const steps = document.getElementById('stepsDetail');
+  const existing = steps.innerHTML;
+  steps.innerHTML = existing +
+    `<div class="step-line" style="border-top:1px solid var(--accent2); margin-top:0.5rem; padding-top:0.5rem">
+      <span class="step-label">Suma bilateral</span>
+      <span class="step-val">${od}% + ${oi}% = ${sum}%</span>
+    </div>
+    <div class="step-line">
+      <span class="step-label">× Índice bilateralidad (1,50)</span>
+      <span class="step-val">${sum} × 1,50 = <strong style="color:var(--green)">${bilateral}%</strong></span>
+    </div>`;
+
+  document.getElementById('resultsArea').style.display = 'block';
+}
+
+function clearCurrentEye() {
+  const eye = state.currentEye;
+  state.eyes[eye] = { loaded: false, sectors: null, totalDeg: 0, incap: 0, fn: {n:0,d:1}, imgData: null };
+  state.imgElement = null;
+  document.getElementById('canvasPlaceholder').style.display = 'flex';
+  document.getElementById('canvasWrapper').style.display = 'none';
+  document.getElementById('legend').style.display = 'none';
+  document.getElementById('btnAnalyze').disabled = true;
+  document.getElementById('resultsArea').style.display = 'none';
+  document.getElementById('deg' + eye).textContent = '—';
+  document.getElementById('pct' + eye).textContent = 'sin datos';
+  document.getElementById('card' + eye).classList.remove('has-data');
+  document.getElementById('btn' + (eye === 'OD' ? 'od' : 'oi') + '').parentElement;
+  document.getElementById('fnNum').value = 0;
+  document.getElementById('fnDen').value = 1;
+  clearSectorTable();
+  setStatus('', 'Esperando imagen...');
+}
+
+function setStatus(type, msg) {
+  const dot = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  dot.className = 'status-dot' + (type ? ' ' + type : '');
+  text.textContent = msg;
+}
+
+// Drag & drop
+const uploadZone = document.getElementById('uploadZone');
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (file) {
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    document.getElementById('fileInput').files = dt.files;
+    loadImage({ target: { files: [file] } });
+  }
+});
+</script>
+</body>
+</html>
