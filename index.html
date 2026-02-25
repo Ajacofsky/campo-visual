@@ -3,62 +3,110 @@ import cv2
 import numpy as np
 from streamlit_image_coordinates import streamlit_image_coordinates
 
-st.set_page_config(layout="wide", page_title="Peritaje Pro - Calibración")
-st.title("⚖️ Calibración de 3 Puntos")
+st.set_page_config(layout="wide", page_title="Peritaje Pro V11")
 
-img_file = st.sidebar.file_uploader("Subir Campo Visual", type=['jpg', 'png', 'jpeg'])
+# Inicializamos el estado de los puntos
+if "puntos" not in st.session_state:
+    st.session_state.puntos = []
+
+img_file = st.sidebar.file_uploader("📁 Subir Campo Visual", type=['jpg', 'png', 'jpeg'])
 
 if img_file is not None:
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     img_orig = cv2.imdecode(file_bytes, 1)
-    
-    if "puntos" not in st.session_state:
-        st.session_state.puntos = []
+    h, w = img_orig.shape[:2]
 
-    # UI de Instrucciones
-    pasos = ["CENTRO (0,0)", "60° DERECHA (Eje X)", "60° ARRIBA (Eje Y)"]
+    # --- LÓGICA DE INSTRUCCIONES DINÁMICAS ---
+    n_puntos = len(st.session_state.puntos)
     
-    if len(st.session_state.puntos) < 3:
-        idx = len(st.session_state.puntos)
-        st.info(f"📍 PASO {idx + 1}: Marcá el {pasos[idx]}")
+    if n_puntos == 0:
+        texto_guia = "🎯 PASO 1: Hacé clic en el CENTRO exacto del informe (Cruce 0,0)"
+        color_guia = "blue"
+    elif n_puntos == 1:
+        texto_guia = "➡️ PASO 2: Hacé clic en la marca de 60° a la DERECHA (Eje X)"
+        color_guia = "green"
+    elif n_puntos == 2:
+        texto_guia = "⬆️ PASO 3: Hacé clic en la marca de 60° ARRIBA (Eje Y)"
+        color_guia = "orange"
     else:
-        if st.sidebar.button("🔄 Reiniciar Calibración"):
-            st.session_state.puntos = []
-            st.rerun()
+        texto_guia = "✅ Calibración completa. Analizando resultados..."
+        color_guia = "gray"
 
-    # --- DIBUJAR PUNTOS PREVIOS PARA REFERENCIA ---
-    img_previa = img_orig.copy()
-    for p in st.session_state.puntos:
-        cv2.circle(img_previa, p, 10, (0, 0, 255), -1) # Círculo rojo en puntos ya marcados
+    st.markdown(f"<h2 style='color:{color_guia}; text-align:center;'>{texto_guia}</h2>", unsafe_allow_html=True)
 
-    # El truco: La 'key' cambia según cuántos puntos llevamos (ej: 'cal_0', 'cal_1'...)
-    # Esto resetea el componente y permite capturar el siguiente clic.
-    key_actual = f"calibrador_{len(st.session_state.puntos)}"
-    
-    coords = streamlit_image_coordinates(img_previa, key=key_actual)
+    if n_puntos < 3:
+        # Dibujamos lo que ya marcamos para no perder la referencia
+        img_temp = img_orig.copy()
+        for p in st.session_state.puntos:
+            cv2.drawMarker(img_temp, p, (0, 0, 255), cv2.MARKER_CROSS, 30, 3)
 
-    if coords:
-        p_nuevo = (coords["x"], coords["y"])
-        # Solo agregamos si no es el último punto (evita rebotes)
-        if len(st.session_state.puntos) == 0 or p_nuevo != st.session_state.puntos[-1]:
-            st.session_state.puntos.append(p_nuevo)
-            st.rerun()
+        # Capturamos el clic. La 'key' cambia para forzar el refresco de Streamlit
+        coords = streamlit_image_coordinates(img_temp, key=f"step_{n_puntos}")
 
-    # --- PROCESAMIENTO FINAL ---
-    if len(st.session_state.puntos) == 3:
-        st.success("✅ ¡Calibración completa! Procesando resultados...")
-        
+        if coords:
+            p_nuevo = (coords["x"], coords["y"])
+            # Evitar doble clic accidental
+            if n_puntos == 0 or p_nuevo != st.session_state.puntos[-1]:
+                st.session_state.puntos.append(p_nuevo)
+                st.rerun()
+    else:
+        # --- PROCESAMIENTO CON CALIBRACIÓN DE 3 PUNTOS ---
         cx, cy = st.session_state.puntos[0]
         x60_der, y60_der = st.session_state.puntos[1]
         x60_arr, y60_arr = st.session_state.puntos[2]
 
-        # Escalas independientes (Corrige deformación)
-        px_grado_x = np.abs(x60_der - cx) / 60
-        px_grado_y = np.abs(y60_arr - cy) / 60
+        # Calculamos escalas independientes (Corrige estiramiento de la foto)
+        px_por_10_x = (np.abs(x60_der - cx)) / 6 
+        px_por_10_y = (np.abs(y60_arr - cy)) / 6
 
-        # (Aquí sigue el resto de la lógica de detección de cuadrados...)
-        # ... [El código de análisis de solidez se mantiene igual] ...
-        st.write(f"Escala X: {round(px_grado_x, 2)} | Escala Y: {round(px_grado_y, 2)}")
+        # Procesamiento de imagen
+        umbral = st.sidebar.slider("Sensibilidad Negros", 50, 255, 140)
+        gris = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
+        _, binaria = cv2.threshold(gris, umbral, 255, cv2.THRESH_BINARY_INV)
+        
+        img_final = img_orig.copy()
+        puntos_totales = 0
 
-else:
-    st.info("Subí la imagen para empezar.")
+        # Analizamos SOLO 4 ANILLOS (10° a 40°)
+        for i in range(4):
+            rx_ext = (i + 1) * px_por_10_x
+            ry_ext = (i + 1) * px_por_10_y
+            rx_int = i * px_por_10_x
+            ry_int = i * px_por_10_y
+            
+            for s in range(8):
+                ang = s * 45
+                mask = np.zeros((h, w), dtype=np.uint8)
+                # Creamos elipses por si la imagen está deformada
+                cv2.ellipse(mask, (cx, cy), (int(rx_ext), int(ry_ext)), 0, ang, ang + 45, 255, -1)
+                cv2.ellipse(mask, (cx, cy), (int(rx_int), int(ry_int)), 0, 0, 360, 0, -1)
+                
+                # Análisis de Masa Sólida (Filtro de Solidez para ignorar círculos)
+                sector = cv2.bitwise_and(binaria, mask)
+                cnts, _ = cv2.findContours(sector, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                
+                area_solida = 0
+                for c in cnts:
+                    area = cv2.contourArea(c)
+                    if area < 8: continue # Filtro de ruido
+                    hull = cv2.convexHull(c)
+                    solidez = area / cv2.contourArea(hull) if cv2.contourArea(hull) > 0 else 0
+                    if solidez > 0.75: # Solo si es un bloque macizo (cuadrado)
+                        area_solida += area
+
+                area_total_sector = np.count_nonzero(mask)
+                if area_total_sector > 0:
+                    ocupacion = (area_solida / area_total_sector) * 100
+                    color, pts = None, 0
+                    
+                    # REGLA: Amarillo > 70% (equivalente a >8% de masa sólida en el sector circular)
+                    if ocupacion >= 8:
+                        color, pts = (0, 255, 255), 10
+                    elif 1.2 < ocupacion < 8:
+                        color, pts = (255, 255, 0), 5
+                    
+                    if color:
+                        puntos_totales += pts
+                        overlay = img_final.copy()
+                        cv2.ellipse(overlay, (cx, cy), (int(rx_ext), int(ry_ext)), 0, ang, ang + 45, color, -1)
+                        cv2.ellipse
