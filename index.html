@@ -3,95 +3,62 @@ import cv2
 import numpy as np
 from streamlit_image_coordinates import streamlit_image_coordinates
 
-st.set_page_config(layout="wide", page_title="Peritaje Pro V14")
+# Configuración inicial de memoria
+if "paso" not in st.session_state:
+    st.session_state.paso = 1
+if "puntos" not in st.session_state:
+    st.session_state.puntos = {}
 
-# --- ESTADO INICIAL ---
-if "p1" not in st.session_state: st.session_state.p1 = None
-if "p2" not in st.session_state: st.session_state.p2 = None
+st.title("⚖️ Analizador de Incapacidad")
 
-st.title("⚖️ Analizador de Incapacidad - Calibración por Etapas")
+# --- CABECERA DINÁMICA ---
+# Esto es lo que NO te estaba cambiando. Ahora depende de st.session_state.paso
+if st.session_state.paso == 1:
+    st.header("1. Ubicá el Centro (0,0)")
+elif st.session_state.paso == 2:
+    st.header("2. Ubicá la marca de 60° a la DERECHA")
+elif st.session_state.paso == 3:
+    st.header("3. Ubicá la marca de 60° SUPERIOR")
+else:
+    st.header("✅ Calibración Completa")
 
-img_file = st.sidebar.file_uploader("1. Subir Informe", type=['jpg', 'png', 'jpeg'])
+img_file = st.sidebar.file_uploader("Subir Campo Visual", type=['jpg', 'png', 'jpeg'])
 
 if img_file:
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
-    img = cv2.imdecode(file_bytes, 1)
-    
-    # --- FASE 1: EL CENTRO ---
-    st.markdown("### 🎯 Fase 1: Ubicar el Centro")
-    conf_centro = st.checkbox("Confirmar Centro y pasar a Margen 60°")
-    
-    if not conf_centro:
-        st.info("Hacé clic en el cruce central (0,0)")
-        coords1 = streamlit_image_coordinates(img, key="centro")
-        if coords1:
-            st.session_state.p1 = (coords1["x"], coords1["y"])
-        
-        if st.session_state.p1:
-            img_c = img.copy()
-            cv2.drawMarker(img_c, st.session_state.p1, (255,0,0), cv2.MARKER_CROSS, 40, 3)
-            st.image(cv2.cvtColor(img_c, cv2.COLOR_BGR2RGB), caption="Centro marcado")
-    
-    # --- FASE 2: MARGEN 60° ---
-    else:
-        if st.session_state.p1 is None:
-            st.error("Primero debes marcar el centro (destilda el cuadro de abajo).")
-        else:
-            st.markdown("### ➡️ Fase 2: Ubicar Margen de 60°")
-            img_m = img.copy()
-            cv2.drawMarker(img_m, st.session_state.p1, (255,0,0), cv2.MARKER_CROSS, 40, 3)
-            
-            coords2 = streamlit_image_coordinates(img_m, key="margen")
-            if coords2:
-                st.session_state.p2 = (coords2["x"], coords2["y"])
-            
-            if st.session_state.p2:
-                st.success(f"Punto 60° detectado en: {st.session_state.p2}")
-                
-                # --- PROCESAMIENTO FINAL ---
-                cx, cy = st.session_state.p1
-                x60, y60 = st.session_state.p2
-                
-                # Regla de los 6 segmentos (10° cada uno)
-                dist_total = np.sqrt((x60-cx)**2 + (y60-cy)**2)
-                px_10 = dist_total / 6
-                
-                # Detección de negros
-                gris = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                _, bin = cv2.threshold(gris, 140, 255, cv2.THRESH_BINARY_INV)
-                
-                res = img.copy()
-                puntos = 0
-                
-                for i in range(1, 5): # 4 anillos (10 a 40)
-                    r_e = int(i * px_10)
-                    r_i = int((i-1) * px_10)
-                    for s in range(8):
-                        ang = s * 45
-                        mask = np.zeros(img.shape[:2], dtype=np.uint8)
-                        cv2.ellipse(mask, (cx, cy), (r_e, r_e), 0, ang, ang + 45, 255, -1)
-                        cv2.circle(mask, (cx, cy), r_i, 0, -1)
-                        
-                        masa = np.count_nonzero(cv2.bitwise_and(bin, mask))
-                        area = np.count_nonzero(mask)
-                        if area > 0:
-                            ocu = (masa/area)*100
-                            col = None
-                            if ocu > 8: col, pts = (0,255,255), 10
-                            elif 1.2 < ocu <= 8: col, pts = (255,255,0), 5
-                            
-                            if col:
-                                puntos += pts
-                                ov = res.copy()
-                                cv2.ellipse(ov, (cx, cy), (r_e, r_e), 0, ang, ang + 45, col, -1)
-                                cv2.circle(ov, (cx, cy), r_i, (255,255,255), -1)
-                                res = cv2.addWeighted(ov, 0.4, res, 0.6, 0)
-                
-                st.divider()
-                st.markdown(f"## 📊 RESULTADO: {puntos} pts")
-                st.image(cv2.cvtColor(res, cv2.COLOR_BGR2RGB), use_container_width=True)
+    img_orig = cv2.imdecode(file_bytes, 1)
 
-    if st.sidebar.button("🗑️ Limpiar Memoria"):
-        st.session_state.p1 = None
-        st.session_state.p2 = None
+    # Si estamos en proceso de marcar puntos
+    if st.session_state.paso <= 3:
+        # Mostramos la imagen para que el usuario haga clic
+        # Agregamos una 'key' única para cada paso para que el componente se resetee
+        coords = streamlit_image_coordinates(img_orig, key=f"clic_paso_{st.session_state.paso}")
+        
+        if coords:
+            st.session_state.temp_point = (coords["x"], coords["y"])
+            st.write(f"Punto seleccionado: {st.session_state.temp_point}")
+            
+            # EL BOTÓN QUE FUERZA EL CAMBIO
+            if st.button(f"Confirmar Punto {st.session_state.paso} y Continuar"):
+                # Guardamos el punto en el diccionario
+                st.session_state.puntos[st.session_state.paso] = st.session_state.temp_point
+                # Avanzamos el paso
+                st.session_state.paso += 1
+                # Forzamos el reinicio de la página para que cambie el st.header
+                st.rerun()
+    else:
+        # --- LÓGICA DE CÁLCULO (Solo cuando ya tenemos los 3 puntos) ---
+        p1 = st.session_state.puntos[1] # Centro
+        p2 = st.session_state.puntos[2] # 60° Derecha
+        
+        # Distancia para calcular los anillos (tu regla de dividir por 6)
+        dist_x = np.abs(p2[0] - p1[0])
+        px_cada_10 = dist_x / 6
+        
+        st.success(f"Calibración exitosa: {round(px_cada_10, 2)} píxeles cada 10°")
+        # Aquí sigue tu código de dibujo de anillos y conteo de negros...
+        
+    if st.sidebar.button("Limpiar y Reiniciar"):
+        st.session_state.paso = 1
+        st.session_state.puntos = {}
         st.rerun()
