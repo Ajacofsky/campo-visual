@@ -1,85 +1,97 @@
 import streamlit as st
 import cv2
 import numpy as np
+from streamlit_image_coordinates import streamlit_image_coordinates
 
-st.set_page_config(layout="wide", page_title="Peritaje Pro V13")
-st.title("⚖️ Analizador de Incapacidad - Control de Precisión")
+st.set_page_config(layout="wide", page_title="Peritaje Pro V14")
 
-img_file = st.sidebar.file_uploader("1. Subir Campo Visual", type=['jpg', 'png', 'jpeg'])
+# --- ESTADO INICIAL ---
+if "p1" not in st.session_state: st.session_state.p1 = None
+if "p2" not in st.session_state: st.session_state.p2 = None
 
-if img_file is not None:
+st.title("⚖️ Analizador de Incapacidad - Calibración por Etapas")
+
+img_file = st.sidebar.file_uploader("1. Subir Informe", type=['jpg', 'png', 'jpeg'])
+
+if img_file:
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
-    img_orig = cv2.imdecode(file_bytes, 1)
-    h, w = img_orig.shape[:2]
-
-    # --- CONTROLES MANUALES EN LA BARRA LATERAL ---
-    st.sidebar.markdown("### 🎯 Calibración del Centro")
-    cx = st.sidebar.slider("Centro X (Horizontal)", 0, w, w // 2)
-    cy = st.sidebar.slider("Centro Y (Vertical)", 0, h, h // 2)
-
-    st.sidebar.markdown("### 📏 Calibración de Escala (Marca 60°)")
-    x60 = st.sidebar.slider("Punto 60° Horizontal", 0, w, cx + 150)
+    img = cv2.imdecode(file_bytes, 1)
     
-    # --- CÁLCULO DE ESCALA (Dividir por 6 para obtener 10°) ---
-    dist_60 = np.abs(x60 - cx)
-    px_por_10_grados = dist_60 / 6
-
-    # --- PROCESAMIENTO ---
-    umbral = st.sidebar.slider("Sensibilidad de Negros", 50, 255, 140)
-    gris = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
-    _, binaria = cv2.threshold(gris, umbral, 255, cv2.THRESH_BINARY_INV)
+    # --- FASE 1: EL CENTRO ---
+    st.markdown("### 🎯 Fase 1: Ubicar el Centro")
+    conf_centro = st.checkbox("Confirmar Centro y pasar a Margen 60°")
     
-    # Filtro para solo ver cuadrados sólidos
-    kernel = np.ones((3,3), np.uint8)
-    binaria = cv2.morphologyEx(binaria, cv2.MORPH_OPEN, kernel)
-
-    img_res = img_orig.copy()
-    puntos_totales = 0
-
-    # DIBUJAMOS Y EVALUAMOS 4 ANILLOS (Hasta 40°)
-    for i in range(1, 5):
-        r_ext = int(i * px_por_10_grados)
-        r_int = int((i-1) * px_por_10_grados)
+    if not conf_centro:
+        st.info("Hacé clic en el cruce central (0,0)")
+        coords1 = streamlit_image_coordinates(img, key="centro")
+        if coords1:
+            st.session_state.p1 = (coords1["x"], coords1["y"])
         
-        for s in range(8):
-            ang = s * 45
-            mask = np.zeros((h, w), dtype=np.uint8)
-            cv2.ellipse(mask, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, 255, -1)
-            cv2.circle(mask, (cx, cy), r_int, 0, -1)
+        if st.session_state.p1:
+            img_c = img.copy()
+            cv2.drawMarker(img_c, st.session_state.p1, (255,0,0), cv2.MARKER_CROSS, 40, 3)
+            st.image(cv2.cvtColor(img_c, cv2.COLOR_BGR2RGB), caption="Centro marcado")
+    
+    # --- FASE 2: MARGEN 60° ---
+    else:
+        if st.session_state.p1 is None:
+            st.error("Primero debes marcar el centro (destilda el cuadro de abajo).")
+        else:
+            st.markdown("### ➡️ Fase 2: Ubicar Margen de 60°")
+            img_m = img.copy()
+            cv2.drawMarker(img_m, st.session_state.p1, (255,0,0), cv2.MARKER_CROSS, 40, 3)
             
-            # Análisis de masa negra
-            sector_negro = cv2.bitwise_and(binaria, mask)
-            area_negra = np.count_nonzero(sector_negro)
-            area_total = np.count_nonzero(mask)
+            coords2 = streamlit_image_coordinates(img_m, key="margen")
+            if coords2:
+                st.session_state.p2 = (coords2["x"], coords2["y"])
             
-            if area_total > 0:
-                ocupacion = (area_negra / area_total) * 100
-                color, pts = None, 0
+            if st.session_state.p2:
+                st.success(f"Punto 60° detectado en: {st.session_state.p2}")
                 
-                # Tu regla de 70% de cuadraditos (aprox 8% de masa en el sector circular)
-                if ocupacion >= 8:
-                    color, pts = (0, 255, 255), 10 # Amarillo
-                elif 1.2 < ocupacion < 8:
-                    color, pts = (255, 255, 0), 5  # Celeste
+                # --- PROCESAMIENTO FINAL ---
+                cx, cy = st.session_state.p1
+                x60, y60 = st.session_state.p2
                 
-                if color:
-                    puntos_totales += pts
-                    overlay = img_res.copy()
-                    cv2.ellipse(overlay, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, color, -1)
-                    cv2.circle(overlay, (cx, cy), r_int, (255,255,255), -1)
-                    img_res = cv2.addWeighted(overlay, 0.4, img_res, 0.6, 0)
+                # Regla de los 6 segmentos (10° cada uno)
+                dist_total = np.sqrt((x60-cx)**2 + (y60-cy)**2)
+                px_10 = dist_total / 6
+                
+                # Detección de negros
+                gris = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                _, bin = cv2.threshold(gris, 140, 255, cv2.THRESH_BINARY_INV)
+                
+                res = img.copy()
+                puntos = 0
+                
+                for i in range(1, 5): # 4 anillos (10 a 40)
+                    r_e = int(i * px_10)
+                    r_i = int((i-1) * px_10)
+                    for s in range(8):
+                        ang = s * 45
+                        mask = np.zeros(img.shape[:2], dtype=np.uint8)
+                        cv2.ellipse(mask, (cx, cy), (r_e, r_e), 0, ang, ang + 45, 255, -1)
+                        cv2.circle(mask, (cx, cy), r_i, 0, -1)
+                        
+                        masa = np.count_nonzero(cv2.bitwise_and(bin, mask))
+                        area = np.count_nonzero(mask)
+                        if area > 0:
+                            ocu = (masa/area)*100
+                            col = None
+                            if ocu > 8: col, pts = (0,255,255), 10
+                            elif 1.2 < ocu <= 8: col, pts = (255,255,0), 5
+                            
+                            if col:
+                                puntos += pts
+                                ov = res.copy()
+                                cv2.ellipse(ov, (cx, cy), (r_e, r_e), 0, ang, ang + 45, col, -1)
+                                cv2.circle(ov, (cx, cy), r_i, (255,255,255), -1)
+                                res = cv2.addWeighted(ov, 0.4, res, 0.6, 0)
+                
+                st.divider()
+                st.markdown(f"## 📊 RESULTADO: {puntos} pts")
+                st.image(cv2.cvtColor(res, cv2.COLOR_BGR2RGB), use_container_width=True)
 
-        # Dibujar anillo guía
-        cv2.circle(img_res, (cx, cy), r_ext, (200, 200, 200), 1)
-
-    # Dibujar Cruz de Centro y Marca de 60
-    cv2.drawMarker(img_res, (cx, cy), (255, 0, 0), cv2.MARKER_CROSS, 30, 2)
-    cv2.drawMarker(img_res, (x60, cy), (0, 0, 255), cv2.MARKER_TACK, 20, 2)
-
-    # --- RESULTADOS ---
-    st.markdown(f"## 📊 SUMA: {puntos_totales} pts | Incapacidad: {round((puntos_totales/320)*100, 1)}%")
-    st.image(cv2.cvtColor(img_res, cv2.COLOR_BGR2RGB), use_container_width=True)
-    st.info("💡 Ajustá los sliders de la izquierda para que los anillos coincidan con tu informe.")
-
-else:
-    st.info("Subí el campo visual para comenzar.")
+    if st.sidebar.button("🗑️ Limpiar Memoria"):
+        st.session_state.p1 = None
+        st.session_state.p2 = None
+        st.rerun()
