@@ -3,83 +3,88 @@ import cv2
 import numpy as np
 from streamlit_image_coordinates import streamlit_image_coordinates
 
-st.set_page_config(layout="wide", page_title="Peritaje Pro - V16")
+st.set_page_config(layout="wide", page_title="Peritaje Pro V17")
 
-# --- MEMORIA DEL PROGRAMA ---
-if "puntos_calibracion" not in st.session_state:
-    st.session_state.puntos_calibracion = {} # Diccionario para guardar Centro, X y Y
+# --- MEMORIA DE ESTADO ---
+if "centro" not in st.session_state: st.session_state.centro = None
+if "punto60" not in st.session_state: st.session_state.punto60 = None
+if "fijar_centro" not in st.session_state: st.session_state.fijar_centro = False
 
-# --- BARRA LATERAL: SELECTOR DE PASO ---
-st.sidebar.title("⚙️ Calibración")
-etapa = st.sidebar.radio(
-    "Seleccioná qué vas a marcar:",
-    ["1. Centro (0,0)", "2. Marca 60° Derecha", "3. Marca 60° Arriba", "4. Ver Resultados"]
-)
+st.title("⚖️ Analizador de Incapacidad")
 
-if st.sidebar.button("🗑️ Reiniciar Todo"):
-    st.session_state.puntos_calibracion = {}
-    st.rerun()
-
-# --- CARGA DE ARCHIVO ---
-img_file = st.sidebar.file_uploader("Subir Campo Visual", type=['jpg', 'png', 'jpeg'])
+img_file = st.sidebar.file_uploader("Subir Informe", type=['jpg', 'png', 'jpeg'])
 
 if img_file:
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     img_orig = cv2.imdecode(file_bytes, 1)
-    
-    # Titulo dinámico basado en el selector de la izquierda
-    st.header(f"📍 Estás en: {etapa}")
+    h, w = img_orig.shape[:2]
 
-    if etapa != "4. Ver Resultados":
-        st.info(f"Hacé clic en la imagen para ubicar: {etapa}")
-        
-        # Mostramos lo que ya se marcó para no perderse
-        img_temp = img_orig.copy()
-        for nombre, p in st.session_state.puntos_calibracion.items():
-            cv2.drawMarker(img_temp, p, (0, 0, 255), cv2.MARKER_CROSS, 30, 2)
-            cv2.putText(img_temp, nombre, (p[0]+10, p[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
-
-        # Captura de coordenadas con llave única por etapa
-        coords = streamlit_image_coordinates(img_temp, key=f"input_{etapa}")
-        
-        if coords:
-            punto = (coords["x"], coords["y"])
-            st.session_state.puntos_calibracion[etapa] = punto
-            st.success(f"Registrado: {etapa} en {punto}")
-            st.warning("Ahora seleccioná el siguiente paso en la barra lateral ⬅️")
-            
+    # --- LÓGICA DE INTERFAZ ---
+    if not st.session_state.fijar_centro:
+        st.subheader("🎯 PASO 1: Ubicá el Centro (0,0)")
+        st.info("Hacé clic en la cruz central. Cuando esté bien ubicado, presioná el botón 'FIJAR CENTRO'.")
     else:
-        # --- PROCESAMIENTO FINAL ---
-        if len(st.session_state.puntos_calibracion) < 2:
-            st.error("Faltan marcar puntos (Centro y al menos una marca de 60°).")
+        st.subheader("➡️ PASO 2: Ubicá la marca de 60° (Eje X)")
+        st.warning("El centro está bloqueado. Ahora hacé clic donde dice '60' en el eje horizontal.")
+
+    # Dibujar marcas actuales
+    img_draw = img_orig.copy()
+    if st.session_state.centro:
+        cv2.drawMarker(img_draw, st.session_state.centro, (255, 0, 0), cv2.MARKER_CROSS, 40, 2)
+    if st.session_state.punto60:
+        cv2.drawMarker(img_draw, st.session_state.punto60, (0, 0, 255), cv2.MARKER_TACK, 30, 2)
+
+    # CAPTURA DE CLIC
+    # Cambiamos la key para que el componente se refresque al cambiar de paso
+    k = "click_centro" if not st.session_state.fijar_centro else "click_60"
+    coords = streamlit_image_coordinates(img_draw, key=k)
+
+    if coords:
+        p = (coords["x"], coords["y"])
+        if not st.session_state.fijar_centro:
+            st.session_state.centro = p # El clic mueve el centro
         else:
-            # Recuperar puntos
-            c = st.session_state.puntos_calibracion.get("1. Centro (0,0)")
-            d = st.session_state.puntos_calibracion.get("2. Marca 60° Derecha")
-            a = st.session_state.puntos_calibracion.get("3. Marca 60° Arriba")
+            st.session_state.punto60 = p # El clic mueve la marca de 60
 
-            # Cálculo de escala (tu propuesta de dividir por 6)
-            # Usamos Derecha por defecto, si no está usamos Arriba
-            ref = d if d else a
-            dist_px = np.sqrt((ref[0]-c[0])**2 + (ref[1]-c[1])**2)
-            px_10 = dist_px / 6
+    # --- BOTONES DE CONTROL ---
+    col1, col2 = st.columns(2)
+    with col1:
+        if not st.session_state.fijar_centro:
+            if st.button("✅ FIJAR CENTRO"):
+                st.session_state.fijar_centro = True
+                st.rerun()
+        else:
+            if st.button("🔄 CORREGIR CENTRO"):
+                st.session_state.fijar_centro = False
+                st.session_state.punto60 = None
+                st.rerun()
+    
+    with col2:
+        if st.sidebar.button("🗑️ Reset Total"):
+            st.session_state.centro = None
+            st.session_state.punto60 = None
+            st.session_state.fijar_centro = False
+            st.rerun()
 
-            # Detección de negros y dibujo de anillos
-            res = img_orig.copy()
-            total_pts = 0
-            gris = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
-            _, binaria = cv2.threshold(gris, 150, 255, cv2.THRESH_BINARY_INV)
+    # --- PROCESAMIENTO FINAL (Solo si ambos puntos existen) ---
+    if st.session_state.centro and st.session_state.punto60:
+        cx, cy = st.session_state.centro
+        x60, y60 = st.session_state.punto60
+        
+        # Tal como pediste: dividir la distancia al 60 por 6 para tener pasos de 10
+        dist_total = np.sqrt((x60-cx)**2 + (y60-cy)**2)
+        px_10 = dist_total / 6
+        
+        res = img_orig.copy()
+        
+        # Dibujar los anillos según tu Word (4 anillos hasta 40°) 
+        for i in range(1, 5):
+            radio = int(i * px_10)
+            cv2.circle(res, (cx, cy), radio, (0, 255, 0), 2)
+            cv2.putText(res, f"{i*10}g", (cx + radio, cy - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
 
-            for i in range(1, 5): # 4 anillos como pediste
-                r = int(i * px_10)
-                r_in = int((i-1) * px_10)
-                cv2.circle(res, c, r, (200,200,200), 1)
-                
-                # Aquí iría el bucle de sectores (45°) y suma de puntos
-                # (Omitido brevemente para asegurar que la interfaz funcione)
-            
-            st.image(cv2.cvtColor(res, cv2.COLOR_BGR2RGB), use_container_width=True)
-            st.success("✅ Escala aplicada correctamente.")
+        st.image(cv2.cvtColor(res, cv2.COLOR_BGR2RGB), caption="Previsualización de Anillos (10°-40°)")
+        st.success(f"Escala calculada: {round(px_10, 2)} píxeles por cada 10 grados.")
 
 else:
-    st.info("Por favor, subí la imagen para comenzar.")
+    st.info("Subí la imagen para comenzar la calibración.")
