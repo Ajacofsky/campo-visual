@@ -2,86 +2,86 @@ import streamlit as st
 import cv2
 import numpy as np
 
-st.set_page_config(layout="wide", page_title="Peritaje Pro V23")
+st.set_page_config(layout="wide", page_title="Peritaje Pro V24")
 
-# --- INTERFAZ DE CONTROL ---
-st.sidebar.title("📏 Calibración de Ejes")
-img_file = st.sidebar.file_uploader("Subir Informe", type=['jpg', 'png', 'jpeg'])
+# --- INTERFAZ ---
+st.sidebar.title("📏 Calibración de Precisión")
+img_file = st.sidebar.file_uploader("Subir Campo Visual", type=['jpg', 'png', 'jpeg'])
 
 if img_file:
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     img_orig = cv2.imdecode(file_bytes, 1)
     h, w = img_orig.shape[:2]
 
-    # 1. POSICIONAMIENTO DEL CENTRO (0,0)
-    cx = st.sidebar.slider("Centro Horizontal (X)", 0, w, w // 2)
-    cy = st.sidebar.slider("Centro Vertical (Y)", 0, h, h // 2)
+    # 1. UBICACIÓN DEL CENTRO
+    st.sidebar.markdown("### 1. Centro (0,0)")
+    cx = st.sidebar.slider("Eje X Central", 0, w, w // 2)
+    cy = st.sidebar.slider("Eje Y Central", 0, h, h // 2)
 
-    # 2. ANCLAJE A LA MARCA DE 60 GRADOS
-    # Movemos este slider hasta que la marca guía coincida con el '60' del papel
-    x60 = st.sidebar.slider("Ajustar a Marca 60°", cx, w, cx + 250)
+    # 2. ANCLAJE AL ANILLO EXTERNO (60°)
+    st.sidebar.markdown("### 2. Ancla de 60°")
+    # Movemos este slider hasta que el marcador coincida con el '60' del papel
+    x60 = st.sidebar.slider("Ubicar sobre marca 60°", cx, w, cx + 200)
     
-    # LÓGICA MATEMÁTICA: La distancia total se divide por 6 para obtener pasos de 10°
-    distancia_total = x60 - cx
-    px_cada_10 = distancia_total / 6
+    # MATEMÁTICA: Distancia Centro-60 dividida 6 = Distancia cada 10°
+    distancia_60 = x60 - cx
+    px_cada_10 = distancia_60 / 6
 
-    # 3. DETECCIÓN
-    umbral = st.sidebar.slider("Sensibilidad de Cuadrados Negros", 50, 255, 140)
+    # 3. SENSIBILIDAD
+    umbral = st.sidebar.slider("Sensibilidad Negros", 50, 255, 140)
 
-    # --- RENDERIZADO DE ALTA VISIBILIDAD ---
+    # --- PROCESAMIENTO GRÁFICO ---
     img_res = img_orig.copy()
     gris = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
     _, binaria = cv2.threshold(gris, umbral, 255, cv2.THRESH_BINARY_INV)
     
     puntos_totales = 0
 
-    # Dibujamos los 6 anillos para validar la escala, pero evaluamos solo 4 (10° a 40°)
+    # Dibujamos 6 anillos (del 10 al 60) para asegurar coincidencia total
     for i in range(1, 7):
-        radio = int(i * px_cada_10)
+        # El radio es exactamente un múltiplo de la sexta parte de la distancia al 60
+        radio_ext = int(i * px_cada_10)
         radio_int = int((i - 1) * px_cada_10)
         
-        # DIBUJO DE ANILLO NEGRO PURO (Sin transparencia, grosor fuerte)
-        cv2.circle(img_res, (cx, cy), radio, (0, 0, 0), 3)
+        # DIBUJO DE ANILLO: Negro puro, grosor 3 (Máxima visibilidad)
+        cv2.circle(img_res, (cx, cy), radio_ext, (0, 0, 0), 3)
 
-        # EVALUACIÓN DE SECTORES (Solo hasta el 4to anillo / 40 grados)
+        # EVALUACIÓN (Solo anillos 1, 2, 3 y 4 según tu protocolo de 40°)
         if i <= 4:
             for s in range(8):
                 ang = s * 45
                 mask = np.zeros((h, w), dtype=np.uint8)
-                cv2.ellipse(mask, (cx, cy), (radio, radio), 0, ang, ang + 45, 255, -1)
+                cv2.ellipse(mask, (cx, cy), (radio_ext, radio_ext), 0, ang, ang + 45, 255, -1)
                 cv2.circle(mask, (cx, cy), radio_int, 0, -1)
                 
-                # Análisis de masa negra
-                sector_negro = cv2.bitwise_and(binaria, mask)
-                area_negra = np.count_nonzero(sector_negro)
+                area_negra = np.count_nonzero(cv2.bitwise_and(binaria, mask))
                 area_total = np.count_nonzero(mask)
                 
                 if area_total > 0:
                     ocupacion = (area_negra / area_total) * 100
-                    color, pts = None, 0
-                    
-                    if ocupacion >= 8: # Bloque sólido
-                        color, pts = (0, 255, 255), 10 # Amarillo
-                    elif 1.2 < ocupacion < 8: # Punto o borde
-                        color, pts = (255, 255, 0), 5  # Celeste
+                    color = None
+                    if ocupacion >= 8: # Amarillo
+                        color, pts = (0, 255, 255), 10
+                    elif 1.2 < ocupacion < 8: # Celeste
+                        color, pts = (255, 255, 0), 5
                     
                     if color:
                         puntos_totales += pts
                         overlay = img_res.copy()
-                        cv2.ellipse(overlay, (cx, cy), (radio, radio), 0, ang, ang + 45, color, -1)
+                        cv2.ellipse(overlay, (cx, cy), (radio_ext, radio_ext), 0, ang, ang + 45, color, -1)
                         img_res = cv2.addWeighted(overlay, 0.4, img_res, 0.6, 0)
 
-    # DIBUJO DE EJES CARTESIANOS NEGROS
+    # DIBUJO DE EJES NEGROS
     cv2.line(img_res, (cx, 0), (cx, h), (0, 0, 0), 2)
     cv2.line(img_res, (0, cy), (w, cy), (0, 0, 0), 2)
-    
-    # MARCA DE REFERENCIA EN 60° (Para validar que la escala es correcta)
-    cv2.drawMarker(img_res, (x60, cy), (0, 0, 255), cv2.MARKER_TRIANGLE_DOWN, 20, 3)
 
-    # --- RESULTADOS ---
+    # INDICADOR DE CONTROL EN 60°
+    cv2.drawMarker(img_res, (x60, cy), (0, 0, 255), cv2.MARKER_TRIANGLE_DOWN, 25, 4)
+
+    # --- SALIDA ---
     st.subheader(f"📊 Suma: {puntos_totales} pts | Incapacidad: {round((puntos_totales/320)*100, 1)}%")
     st.image(cv2.cvtColor(img_res, cv2.COLOR_BGR2RGB), use_container_width=True)
-    st.info("Mueve el slider 'Ajustar a Marca 60°' hasta que el triángulo rojo toque la marca de 60 de tu informe.")
+    st.success(f"Escala: 10° equivalen a {round(px_cada_10, 2)} píxeles.")
 
 else:
-    st.info("Subí el archivo para aplicar la grilla equidistante.")
+    st.info("Subí la imagen para iniciar la división equidistante.")
