@@ -2,8 +2,8 @@ import streamlit as st
 import cv2
 import numpy as np
 
-st.set_page_config(layout="wide", page_title="Peritaje Pro V25 - PRECISIÓN")
-st.title("⚖️ Calibración de Anillos Equidistantes")
+st.set_page_config(layout="wide", page_title="Peritaje Pro V26")
+st.title("⚖️ Calibración de Máxima Visibilidad")
 
 img_file = st.sidebar.file_uploader("Subir Informe", type=['jpg', 'png', 'jpeg'])
 
@@ -12,31 +12,30 @@ if img_file:
     img_orig = cv2.imdecode(file_bytes, 1)
     h, w = img_orig.shape[:2]
 
-    # --- CONTROLES DE CALIBRACIÓN ---
-    st.sidebar.header("🎯 1. Ubicar el Centro (0,0)")
+    # --- CONTROLES LATERALES ---
+    st.sidebar.header("🎯 1. Centro")
     cx = st.sidebar.slider("Centro X", 0, w, w // 2)
     cy = st.sidebar.slider("Centro Y", 0, h, h // 2)
 
-    st.sidebar.header("📏 2. Anclar a Marca 60°")
-    # Este es el punto maestro que define todos los demás anillos
-    x60 = st.sidebar.slider("Alinear con Marca 60 del Eje X", cx, w, cx + 250)
+    st.sidebar.header("📏 2. Escala (Equidistante)")
+    # El usuario marca el 60. El sistema calcula el paso de 10.
+    x60 = st.sidebar.slider("Alinear con Marca 60°", cx, w, cx + 250)
     
-    # CÁLCULO DE LA UNIDAD EQUIDISTANTE (pasos de 10 grados)
-    distancia_al_60 = x60 - cx
-    px_cada_10 = distancia_al_60 / 6
+    # MATEMÁTICA PURA: Paso exacto cada 10 grados
+    px_cada_10 = (x60 - cx) / 6.0
 
     st.sidebar.header("🔬 3. Detección")
     umbral = st.sidebar.slider("Sensibilidad Negros", 50, 255, 140)
 
-    # --- MOTOR DE PROCESAMIENTO ---
+    # --- RENDERIZADO ---
+    img_res = img_orig.copy()
     gris = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
     _, binaria = cv2.threshold(gris, umbral, 255, cv2.THRESH_BINARY_INV)
     
-    img_res = img_orig.copy()
     puntos_totales = 0
 
-    # PASO 1: Pintar los sectores de color (Amarillo/Celeste)
-    for i in range(1, 5): # Solo anillos del 10 al 40
+    # 1. ANALIZAR Y PINTAR SECTORES (10° a 40°)
+    for i in range(1, 5):
         r_ext = int(i * px_cada_10)
         r_int = int((i - 1) * px_cada_10)
         
@@ -51,42 +50,42 @@ if img_file:
             
             if area_total > 0:
                 ocu = (area_negra / area_total) * 100
-                if ocu >= 8:
-                    color, pts = (0, 255, 255), 10
-                    puntos_totales += pts
+                if ocu >= 8: # Amarillo
                     overlay = img_res.copy()
-                    cv2.ellipse(overlay, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, color, -1)
+                    cv2.ellipse(overlay, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, (0, 255, 255), -1)
                     img_res = cv2.addWeighted(overlay, 0.4, img_res, 0.6, 0)
-                elif 1.2 < ocu < 8:
-                    color, pts = (255, 255, 0), 5
-                    puntos_totales += pts
+                    puntos_totales += 10
+                elif 1.2 < ocu < 8: # Celeste
                     overlay = img_res.copy()
-                    cv2.ellipse(overlay, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, color, -1)
+                    cv2.ellipse(overlay, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, (255, 255, 0), -1)
                     img_res = cv2.addWeighted(overlay, 0.4, img_res, 0.6, 0)
+                    puntos_totales += 5
 
-    # PASO 2: Dibujar la Grilla Negra (AL FINAL para que sea lo más visible)
-    # Dibujamos los 6 anillos para que veas la escala completa hasta 60
-    for i in range(1, 7):
+    # 2. DIBUJAR GRILLA NEGRA REFORZADA (Líneas de 10° a 60°)
+    # Dibujamos de mayor a menor para asegurar que los centros no se borren
+    for i in range(6, 0, -1):
         radio = int(i * px_cada_10)
-        # NEGRO ABSOLUTO (0,0,0) y GROSOR 4 (Muy fuerte)
-        cv2.circle(img_res, (cx, cy), radio, (0, 0, 0), 4)
         
-        # Divisiones de sectores (Líneas radiales negras)
-        for s in range(8):
-            rad = np.radians(s * 45)
-            x_line = int(cx + (6 * px_cada_10) * np.cos(rad))
-            y_line = int(cy + (6 * px_cada_10) * np.sin(rad))
-            cv2.line(img_res, (cx, cy), (x_line, y_line), (0, 0, 0), 2)
+        # EFECTO CONTRASTE: Borde blanco de 8px y centro negro de 4px
+        # Esto garantiza que se vea en zonas oscuras y claras
+        cv2.circle(img_res, (cx, cy), radio, (255, 255, 255), 6) # Borde blanco
+        cv2.circle(img_res, (cx, cy), radio, (0, 0, 0), 3)       # Línea negra interna
 
-    # PASO 3: Ejes Cartesianos y Marca de Guía
-    cv2.line(img_res, (cx, 0), (cx, h), (0, 0, 0), 2) # Eje Y negro
-    cv2.line(img_res, (0, cy), (w, cy), (0, 0, 0), 2) # Eje X negro
-    cv2.drawMarker(img_res, (x60, cy), (0, 0, 255), cv2.MARKER_TRIANGLE_DOWN, 30, 4) # Flecha roja en 60
+    # 3. EJES CARTESIANOS Y MARCAS
+    # Eje X e Y con el mismo efecto de alto contraste
+    cv2.line(img_res, (cx, 0), (cx, h), (255, 255, 255), 4)
+    cv2.line(img_res, (cx, 0), (cx, h), (0, 0, 0), 2)
+    cv2.line(img_res, (0, cy), (w, cy), (255, 255, 255), 4)
+    cv2.line(img_res, (0, cy), (w, cy), (0, 0, 0), 2)
 
-    # --- RESULTADOS ---
-    st.subheader(f"📊 Suma: {puntos_totales} pts | Incapacidad: {round((puntos_totales/320)*100, 1)}%")
+    # Marca de validación en 60 grados (Flecha Roja)
+    cv2.drawMarker(img_res, (x60, cy), (0, 0, 255), cv2.MARKER_TRIANGLE_DOWN, 30, 5)
+
+    # --- MOSTRAR RESULTADOS ---
+    st.subheader(f"📊 Resultado: {puntos_totales} pts | Incapacidad: {round((puntos_totales/320)*100, 1)}%")
     st.image(cv2.cvtColor(img_res, cv2.COLOR_BGR2RGB), use_container_width=True)
-    st.success(f"Configuración: Anillos equidistantes cada {round(px_cada_10, 2)} píxeles.")
+    
+    st.write(f"📏 **INFO:** Cada marca de 10° está a {round(px_cada_10, 1)} píxeles del centro.")
 
 else:
-    st.info("Subí la imagen para aplicar la grilla reforzada.")
+    st.info("Subí la imagen para aplicar la grilla de alta visibilidad.")
