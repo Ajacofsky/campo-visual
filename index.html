@@ -1,52 +1,85 @@
 import streamlit as st
 import cv2
 import numpy as np
-from streamlit_image_coordinates import streamlit_image_coordinates
 
-st.set_page_config(layout="wide", page_title="Peritaje Pro - Calibración Manual")
+st.set_page_config(layout="wide", page_title="Peritaje Pro V13")
+st.title("⚖️ Analizador de Incapacidad - Control de Precisión")
 
-# Gestión de estado persistente
-if "centro" not in st.session_state: st.session_state.centro = None
-if "x60" not in st.session_state: st.session_state.x60 = None
-if "y60" not in st.session_state: st.session_state.y60 = None
-
-def reset_all():
-    st.session_state.centro = None
-    st.session_state.x60 = None
-    st.session_state.y60 = None
-
-img_file = st.sidebar.file_uploader("Subir Imagen", type=['jpg', 'png', 'jpeg'])
-st.sidebar.button("🔄 Reiniciar Todo", on_click=reset_all)
+img_file = st.sidebar.file_uploader("1. Subir Campo Visual", type=['jpg', 'png', 'jpeg'])
 
 if img_file is not None:
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     img_orig = cv2.imdecode(file_bytes, 1)
-    
-    # Selector de paso activo
-    paso = st.radio("Seleccioná el paso a calibrar:", ["Centro", "Margen Derecho (60°)", "Margen Superior (60°)"], horizontal=True)
-    
-    # Captura de coordenadas
-    val = streamlit_image_coordinates(img_orig, key="canvas")
-    
-    if val:
-        coords = (val["x"], val["y"])
-        if paso == "Centro": st.session_state.centro = coords
-        if paso == "Margen Derecho (60°)": st.session_state.x60 = coords
-        if paso == "Margen Superior (60°)": st.session_state.y60 = coords
-        st.write(f"Coordenadas guardadas para {paso}: {coords}")
+    h, w = img_orig.shape[:2]
 
-    # Visualización de lo marcado
-    img_viz = img_orig.copy()
-    if st.session_state.centro: cv2.drawMarker(img_viz, st.session_state.centro, (255, 0, 0), cv2.MARKER_CROSS, 30, 3)
-    if st.session_state.x60: cv2.drawMarker(img_viz, st.session_state.x60, (0, 255, 0), cv2.MARKER_CROSS, 30, 3)
-    if st.session_state.y60: cv2.drawMarker(img_viz, st.session_state.y60, (0, 0, 255), cv2.MARKER_CROSS, 30, 2)
-    
-    st.image(cv2.cvtColor(img_viz, cv2.COLOR_BGR2RGB))
+    # --- CONTROLES MANUALES EN LA BARRA LATERAL ---
+    st.sidebar.markdown("### 🎯 Calibración del Centro")
+    cx = st.sidebar.slider("Centro X (Horizontal)", 0, w, w // 2)
+    cy = st.sidebar.slider("Centro Y (Vertical)", 0, h, h // 2)
 
-    # Botón de Procesar solo si están los 3 puntos
-    if st.session_state.centro and st.session_state.x60 and st.session_state.y60:
-        if st.button("🚀 CALCULAR INCAPACIDAD"):
-            st.success("Calculando...")
-            # (Aquí iría el motor de detección de cuadrados sobre img_orig...)
+    st.sidebar.markdown("### 📏 Calibración de Escala (Marca 60°)")
+    x60 = st.sidebar.slider("Punto 60° Horizontal", 0, w, cx + 150)
+    
+    # --- CÁLCULO DE ESCALA (Dividir por 6 para obtener 10°) ---
+    dist_60 = np.abs(x60 - cx)
+    px_por_10_grados = dist_60 / 6
+
+    # --- PROCESAMIENTO ---
+    umbral = st.sidebar.slider("Sensibilidad de Negros", 50, 255, 140)
+    gris = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
+    _, binaria = cv2.threshold(gris, umbral, 255, cv2.THRESH_BINARY_INV)
+    
+    # Filtro para solo ver cuadrados sólidos
+    kernel = np.ones((3,3), np.uint8)
+    binaria = cv2.morphologyEx(binaria, cv2.MORPH_OPEN, kernel)
+
+    img_res = img_orig.copy()
+    puntos_totales = 0
+
+    # DIBUJAMOS Y EVALUAMOS 4 ANILLOS (Hasta 40°)
+    for i in range(1, 5):
+        r_ext = int(i * px_por_10_grados)
+        r_int = int((i-1) * px_por_10_grados)
+        
+        for s in range(8):
+            ang = s * 45
+            mask = np.zeros((h, w), dtype=np.uint8)
+            cv2.ellipse(mask, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, 255, -1)
+            cv2.circle(mask, (cx, cy), r_int, 0, -1)
+            
+            # Análisis de masa negra
+            sector_negro = cv2.bitwise_and(binaria, mask)
+            area_negra = np.count_nonzero(sector_negro)
+            area_total = np.count_nonzero(mask)
+            
+            if area_total > 0:
+                ocupacion = (area_negra / area_total) * 100
+                color, pts = None, 0
+                
+                # Tu regla de 70% de cuadraditos (aprox 8% de masa en el sector circular)
+                if ocupacion >= 8:
+                    color, pts = (0, 255, 255), 10 # Amarillo
+                elif 1.2 < ocupacion < 8:
+                    color, pts = (255, 255, 0), 5  # Celeste
+                
+                if color:
+                    puntos_totales += pts
+                    overlay = img_res.copy()
+                    cv2.ellipse(overlay, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, color, -1)
+                    cv2.circle(overlay, (cx, cy), r_int, (255,255,255), -1)
+                    img_res = cv2.addWeighted(overlay, 0.4, img_res, 0.6, 0)
+
+        # Dibujar anillo guía
+        cv2.circle(img_res, (cx, cy), r_ext, (200, 200, 200), 1)
+
+    # Dibujar Cruz de Centro y Marca de 60
+    cv2.drawMarker(img_res, (cx, cy), (255, 0, 0), cv2.MARKER_CROSS, 30, 2)
+    cv2.drawMarker(img_res, (x60, cy), (0, 0, 255), cv2.MARKER_TACK, 20, 2)
+
+    # --- RESULTADOS ---
+    st.markdown(f"## 📊 SUMA: {puntos_totales} pts | Incapacidad: {round((puntos_totales/320)*100, 1)}%")
+    st.image(cv2.cvtColor(img_res, cv2.COLOR_BGR2RGB), use_container_width=True)
+    st.info("💡 Ajustá los sliders de la izquierda para que los anillos coincidan con tu informe.")
+
 else:
-    st.info("Subí la imagen para empezar.")
+    st.info("Subí el campo visual para comenzar.")
