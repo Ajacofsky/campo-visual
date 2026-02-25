@@ -2,97 +2,92 @@ import streamlit as st
 import cv2
 import numpy as np
 
-st.set_page_config(layout="wide", page_title="Peritaje Pro V28")
-st.title("⚖️ Calibración de Grilla Roja Equidistante")
+st.set_page_config(layout="wide", page_title="Peritaje Pro V29")
+st.title("⚖️ Calibración Equidistante - Grilla Roja")
 
 img_file = st.sidebar.file_uploader("Subir Informe", type=['jpg', 'png', 'jpeg'])
 
 if img_file:
-    # Cargar imagen original
+    # Carga de imagen
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     img_orig = cv2.imdecode(file_bytes, 1)
     h, w = img_orig.shape[:2]
 
-    # --- CONTROLES DE POSICIÓN ---
+    # --- CONTROLES ---
     st.sidebar.subheader("🎯 1. Ubicar Centro")
-    cx = st.sidebar.slider("Centro X (Horizontal)", 0, w, w // 2)
-    cy = st.sidebar.slider("Centro Y (Vertical)", 0, h, h // 2)
+    cx = st.sidebar.slider("Centro X", 0, w, w // 2)
+    cy = st.sidebar.slider("Centro Y", 0, h, h // 2)
 
-    st.sidebar.subheader("📏 2. Definir Escala")
-    # Este slider debe moverse hasta la marca de 60° del papel
-    x60 = st.sidebar.slider("Alinear con Marca 60°", cx, w, cx + 200)
+    st.sidebar.subheader("📏 2. Ajustar Escala")
+    # Este punto debe coincidir con la marca de 60° del informe
+    x60 = st.sidebar.slider("Alinear con Marca 60°", cx, w, cx + 250)
     
-    # CÁLCULO DE EQUIDISTANCIA: 
-    # La distancia total al 60 se divide por 6. Cada anillo i es i * unidad.
-    px_unidad = (x60 - cx) / 6.0
+    # MATEMÁTICA: Equidistancia garantizada (división por 6)
+    distancia_60 = float(x60 - cx)
+    px_cada_10 = distancia_60 / 6.0
 
     st.sidebar.subheader("🔬 3. Detección")
     umbral = st.sidebar.slider("Umbral de Negros", 50, 255, 140)
 
     # --- PROCESAMIENTO ---
-    img_res = img_orig.copy()
+    # Creamos una copia para los colores de fondo (Sectores)
+    img_color = img_orig.copy()
     gris = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
     _, binaria = cv2.threshold(gris, umbral, 255, cv2.THRESH_BINARY_INV)
     
     puntos_totales = 0
 
-    # 1. PRIMERO: Analizar y pintar los sectores (10° a 40°)
+    # 1. PINTAR SECTORES (Primero los colores para que queden de fondo)
     for i in range(1, 5):
-        r_ext = int(i * px_unidad)
-        r_int = int((i - 1) * px_unidad)
-        
+        r_ext = int(i * px_cada_10)
+        r_int = int((i - 1) * px_cada_10)
         for s in range(8):
             ang = s * 45
             mask = np.zeros((h, w), dtype=np.uint8)
             cv2.ellipse(mask, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, 255, -1)
             cv2.circle(mask, (cx, cy), r_int, 0, -1)
-            
             area_negra = np.count_nonzero(cv2.bitwise_and(binaria, mask))
             area_total = np.count_nonzero(mask)
             
             if area_total > 0:
-                ocupacion = (area_negra / area_total) * 100
-                if ocupacion >= 8: # Amarillo
-                    overlay = img_res.copy()
+                ocu = (area_negra / area_total) * 100
+                if ocu >= 8: # Amarillo
+                    overlay = img_color.copy()
                     cv2.ellipse(overlay, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, (0, 255, 255), -1)
-                    img_res = cv2.addWeighted(overlay, 0.4, img_res, 0.6, 0)
+                    img_color = cv2.addWeighted(overlay, 0.4, img_color, 0.6, 0)
                     puntos_totales += 10
-                elif 1.2 < ocupacion < 8: # Celeste
-                    overlay = img_res.copy()
+                elif 1.2 < ocu < 8: # Celeste
+                    overlay = img_color.copy()
                     cv2.ellipse(overlay, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, (255, 255, 0), -1)
-                    img_res = cv2.addWeighted(overlay, 0.4, img_res, 0.6, 0)
+                    img_color = cv2.addWeighted(overlay, 0.4, img_color, 0.6, 0)
                     puntos_totales += 5
 
-    # 2. SEGUNDO: Dibujar la GRILLA ROJA (Encima de todo para que se vea)
-    color_rojo = (0, 0, 255) # BGR: Rojo puro
+    # 2. DIBUJAR GRILLA ROJA (Al final, encima de todo)
+    # Definimos ROJO PURO en formato BGR para OpenCV
+    ROJO_INTENSO = (0, 0, 255) 
     
-    # Dibujamos los 6 anillos (10, 20, 30, 40, 50, 60)
+    # Anillos equidistantes (10, 20, 30, 40, 50, 60)
     for i in range(1, 7):
-        radio = int(i * px_unidad)
-        # Anillos rojos gruesos (5px)
-        cv2.circle(img_res, (cx, cy), radio, color_rojo, 5)
-        
-        # Líneas de los ejes también en rojo para que coincidan con las marcas
-        for s in range(8):
-            rad = np.radians(s * 45)
-            x_end = int(cx + (6 * px_unidad) * np.cos(rad))
-            y_end = int(cy + (6 * px_unidad) * np.sin(rad))
-            cv2.line(img_res, (cx, cy), (x_end, y_end), color_rojo, 2)
+        radio = int(i * px_cada_10)
+        cv2.circle(img_color, (cx, cy), radio, ROJO_INTENSO, 4) # Grosor 4
 
-    # 3. MARCAS DE CONTROL FINAL
-    # Flecha guía en la posición 60
-    cv2.drawMarker(img_res, (x60, cy), (0, 0, 150), cv2.MARKER_TRIANGLE_DOWN, 30, 5)
+    # Ejes y divisiones de sectores en ROJO
+    for s in range(8):
+        rad = np.radians(s * 45)
+        x_end = int(cx + (6 * px_cada_10) * np.cos(rad))
+        y_end = int(cy + (6 * px_cada_10) * np.sin(rad))
+        cv2.line(img_color, (cx, cy), (x_end, y_end), ROJO_INTENSO, 2)
 
-    # --- MOSTRAR ---
+    # Marca de centro
+    cv2.drawMarker(img_color, (cx, cy), (255, 255, 255), cv2.MARKER_CROSS, 30, 2)
+
+    # --- RESULTADO FINAL ---
     st.subheader(f"📊 Suma: {puntos_totales} pts | Incapacidad: {round((puntos_totales/320)*100, 1)}%")
-    st.image(cv2.cvtColor(img_res, cv2.COLOR_BGR2RGB), use_container_width=True)
+    # IMPORTANTE: Convertimos de BGR a RGB para que Streamlit muestre el Rojo correctamente
+    img_final = cv2.cvtColor(img_color, cv2.COLOR_BGR2RGB)
+    st.image(img_final, use_container_width=True)
     
-    st.markdown(f"""
-    **Instrucciones:**
-    1. Ajustá **X e Y** al centro del informe.
-    2. Mové **'Alinear con Marca 60°'** hasta que el último anillo rojo pise el '60' del papel.
-    3. Los anillos internos (10, 20, 30, 40) se ajustarán **solos** por equidistancia.
-    """)
+    st.success(f"Equidistancia: {round(px_cada_10, 2)} píxeles por cada 10 grados.")
 
 else:
-    st.info("Subí el informe para ver la grilla roja equidistante.")
+    st.info("Subí la imagen para ver la grilla roja.")
