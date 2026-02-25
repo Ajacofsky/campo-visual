@@ -3,96 +3,108 @@ import cv2
 import numpy as np
 from streamlit_image_coordinates import streamlit_image_coordinates
 
-st.set_page_config(layout="wide", page_title="Peritaje Pro - Calibración")
-st.title("⚖️ Analizador de Incapacidad - Calibración de Escala")
+st.set_page_config(layout="wide", page_title="Peritaje Pro - Calibración Manual")
+st.title("⚖️ Analizador de Incapacidad - Calibración por Referencia")
 
-img_file = st.sidebar.file_uploader("Subir Campo Visual", type=['jpg', 'png', 'jpeg'])
+img_file = st.sidebar.file_uploader("1. Subir Campo Visual", type=['jpg', 'png', 'jpeg'])
 
 if img_file is not None:
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     img_orig = cv2.imdecode(file_bytes, 1)
     h, w = img_orig.shape[:2]
 
+    # --- INTERFAZ DE CALIBRACIÓN ---
     st.sidebar.markdown("### 🛠️ Pasos de Calibración")
-    paso = st.sidebar.radio("Seleccioná qué marcar:", ["1. Centro (0,0)", "2. Marca de 60° Derecha"])
-    umbral = st.sidebar.slider("Sensibilidad de Negros", 50, 255, 140)
+    # Usamos session_state para guardar los clics
+    if "puntos" not in st.session_state:
+        st.session_state.puntos = [] # Lista para guardar [Centro, Marca 60°]
 
-    # Inicializar coordenadas en sesión
-    if "p_centro" not in st.session_state: st.session_state.p_centro = (w//2, h//2)
-    if "p_60" not in st.session_state: st.session_state.p_60 = (w//2 + 100, h//2)
+    if len(st.session_state.puntos) < 2:
+        instruccion = "Hacé clic en el CENTRO (Cruce X, Y)" if not st.session_state.puntos else "Ahora hacé clic en la marca de 60° (Derecha)"
+        st.warning(f"👉 {instruccion}")
+    else:
+        if st.sidebar.button("🔄 Reiniciar Calibración"):
+            st.session_state.puntos = []
+            st.rerun()
 
-    st.write(f"### Hacé clic para marcar: {paso}")
+    # Captura de clics sobre la imagen
     coords = streamlit_image_coordinates(img_orig, key="calibrador")
 
-    if coords:
-        if paso == "1. Centro (0,0)":
-            st.session_state.p_centro = (coords["x"], coords["y"])
-        else:
-            st.session_state.p_60 = (coords["x"], coords["y"])
+    if coords and len(st.session_state.puntos) < 2:
+        nuevo_punto = (coords["x"], coords["y"])
+        if nuevo_punto not in st.session_state.puntos:
+            st.session_state.puntos.append(nuevo_punto)
+            st.rerun()
 
-    cx, cy = st.session_state.p_centro
-    x60, y60 = st.session_state.p_60
-
-    # CÁLCULO DE ESCALA Y ROTACIÓN
-    dist_60 = np.sqrt((x60 - cx)**2 + (y60 - cy)**2)
-    px_por_grado = dist_60 / 60
-    angulo_rad = np.arctan2(y60 - cy, x60 - cx)
-    angulo_deg = np.degrees(angulo_rad)
-
-    # --- PROCESAMIENTO ---
-    gris = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
-    _, binaria = cv2.threshold(gris, umbral, 255, cv2.THRESH_BINARY_INV)
-    kernel = np.ones((3,3), np.uint8)
-    binaria = cv2.morphologyEx(binaria, cv2.MORPH_OPEN, kernel)
-
-    img_final = img_orig.copy()
-    total_puntos = 0
-
-    # Analizamos 5 anillos (10° a 50°)
-    for i in range(5): 
-        r_ext = (i + 1) * 10 * px_por_grado
-        r_int = i * 10 * px_por_grado
+    # --- PROCESAMIENTO SI TENEMOS LOS PUNTOS ---
+    if len(st.session_state.puntos) == 2:
+        cx, cy = st.session_state.puntos[0] # Centro
+        x60, y60 = st.session_state.puntos[1] # Punto 60 grados
         
-        for s in range(8):
-            # Ajustamos el ángulo de los sectores según la inclinación detectada
-            offset_angulo = angulo_deg
-            a_inicio = s * 45 + offset_angulo
-            
-            mask = np.zeros((h, w), dtype=np.uint8)
-            cv2.ellipse(mask, (cx, cy), (int(r_ext), int(r_ext)), 0, a_inicio, a_inicio + 45, 255, -1)
-            cv2.circle(mask, (cx, cy), int(r_int), 0, -1)
-            
-            sector_negro = cv2.bitwise_and(binaria, mask)
-            area_negra = np.count_nonzero(sector_negro)
-            area_total = np.count_nonzero(mask)
-            
-            if area_total > 0:
-                ocupacion = (area_negra / area_total) * 100
-                color = None
-                puntos = 0
-                
-                # LÓGICA DE COLORES PEDIDA
-                if ocupacion >= 10: # Ajustado por densidad de masa
-                    color = (0, 255, 255) # AMARILLO (>70% de cuadraditos) -> 10 pts
-                    puntos = 10
-                elif 1.5 < ocupacion < 10:
-                    color = (255, 255, 0) # CELESTE (<70% de cuadraditos) -> 5 pts
-                    puntos = 5
-                
-                if color:
-                    total_puntos += puntos
-                    overlay = img_final.copy()
-                    cv2.ellipse(overlay, (cx, cy), (int(r_ext), int(r_ext)), 0, a_inicio, a_inicio + 45, color, -1)
-                    cv2.circle(overlay, (cx, cy), int(r_int), (255,255,255), -1)
-                    img_final = cv2.addWeighted(overlay, 0.4, img_final, 0.6, 0)
+        # Calcular Escala (Píxeles por grado)
+        distancia_px = np.sqrt((x60 - cx)**2 + (y60 - cy)**2)
+        px_por_grado = distancia_px / 60
+        
+        # Calcular Rotación (por si el papel está torcido)
+        angulo_base = np.degrees(np.arctan2(y60 - cy, x60 - cx))
 
-    # Dibujar indicadores de calibración
-    cv2.line(img_final, (cx, cy), (x60, y60), (255, 0, 0), 2)
-    cv2.drawMarker(img_final, (cx, cy), (255, 0, 0), cv2.MARKER_CROSS, 20, 2)
-    
-    img_rgb = cv2.cvtColor(img_final, cv2.COLOR_BGR2RGB)
-    st.markdown(f"## 📊 Suma: {total_puntos} pts | Escala: {round(px_por_grado, 2)} px/°")
-    st.image(img_rgb, use_container_width=True)
+        # Procesamiento de imagen para detectar cuadrados
+        umbral = st.sidebar.slider("Sensibilidad de Negros", 50, 255, 145)
+        gris = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
+        _, binaria = cv2.threshold(gris, umbral, 255, cv2.THRESH_BINARY_INV)
+        kernel = np.ones((3,3), np.uint8)
+        binaria = cv2.morphologyEx(binaria, cv2.MORPH_OPEN, kernel)
+
+        img_final = img_orig.copy()
+        puntos_totales = 0
+
+        # Generar los 5 anillos (10, 20, 30, 40, 50 grados)
+        for i in range(5):
+            r_ext = (i + 1) * 10 * px_por_grado
+            r_int = i * 10 * px_por_grado
+            
+            # 8 sectores de 45° cada uno
+            for s in range(8):
+                a_inicio = s * 45 + angulo_base - 0 # Ajuste de rotación
+                
+                mask = np.zeros((h, w), dtype=np.uint8)
+                cv2.ellipse(mask, (cx, cy), (int(r_ext), int(r_ext)), 0, a_inicio, a_inicio + 45, 255, -1)
+                cv2.circle(mask, (cx, cy), int(r_int), 0, -1)
+                
+                # Evaluación de contenido
+                area_negra = np.count_nonzero(cv2.bitwise_and(binaria, mask))
+                area_total = np.count_nonzero(mask)
+                
+                if area_total > 0:
+                    ocupacion = (area_negra / area_total) * 100
+                    color = None
+                    pts = 0
+                    
+                    # TU REGLA: Amarillo > 70% | Celeste < 70%
+                    if ocupacion >= 10: # Ajustado: 10% de masa suele ser >70% de cuadraditos
+                        color = (0, 255, 255) # Amarillo
+                        pts = 10
+                    elif 1.5 < ocupacion < 10:
+                        color = (255, 255, 0) # Celeste
+                        pts = 5
+                    
+                    if color:
+                        puntos_totales += pts
+                        overlay = img_final.copy()
+                        cv2.ellipse(overlay, (cx, cy), (int(r_ext), int(r_ext)), 0, a_inicio, a_inicio + 45, color, -1)
+                        cv2.circle(overlay, (cx, cy), int(r_int), (255,255,255), -1)
+                        img_final = cv2.addWeighted(overlay, 0.4, img_final, 0.6, 0)
+
+        # Dibujar líneas de referencia de calibración
+        cv2.line(img_final, (cx, cy), (x60, y60), (255, 0, 0), 2)
+        cv2.drawMarker(img_final, (cx, cy), (255, 0, 0), cv2.MARKER_CROSS, 20, 2)
+
+        st.success(f"✅ Calibración lograda: {round(px_por_grado, 2)} px/grado")
+        st.markdown(f"## 📊 SUMA: {puntos_totales} pts | Incapacidad: {round((puntos_totales/320)*100, 1)}%")
+        st.image(cv2.cvtColor(img_final, cv2.COLOR_BGR2RGB), use_container_width=True)
+    else:
+        # Mostrar imagen original para clics si no está calibrado
+        st.image(img_orig, caption="Esperando calibración...", use_container_width=True)
 
 else:
-    st.info("Subí la imagen para calibrar escala y rotación.")
+    st.info("Subí el informe para iniciar la calibración manual.")
