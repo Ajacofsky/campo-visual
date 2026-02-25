@@ -1,54 +1,56 @@
 import streamlit as st
+from PIL import Image, ImageDraw
 import numpy as np
-import cv2
-from matplotlib import pyplot as plt
 
 st.set_page_config(layout="wide")
+st.title("⚖️ Calibración Manual - Rojo Intenso")
 
-st.sidebar.title("Configuración de Grilla")
-file = st.sidebar.file_uploader("Subir informe", type=['jpg', 'png', 'jpeg'])
+file = st.sidebar.file_uploader("1. Subir Informe", type=['jpg', 'png', 'jpeg'])
 
 if file:
-    # 1. Cargar imagen
-    file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
-    img = cv2.imdecode(file_bytes, 1)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # Asegurar formato de color correcto
-    h, w, _ = img.shape
+    # Abrimos la imagen de forma directa con PIL
+    img = Image.open(file).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    w, h = img.size
 
-    # 2. Sliders de control
+    # --- CONTROLES ---
+    st.sidebar.header("🎯 Ajustes")
     cx = st.sidebar.slider("Centro X", 0, w, w // 2)
     cy = st.sidebar.slider("Centro Y", 0, h, h // 2)
-    # Este slider define la distancia al 60. 
-    # El programa dividirá automáticamente por 6 para crear los 10, 20, 30, 40, 50.
-    radio_60 = st.sidebar.slider("Radio hasta Marca 60°", 10, w // 2, 200)
-
-    # 3. Dibujo con Matplotlib (Esto fuerza el color ROJO)
-    fig, ax = plt.subplots(figsize=(10, 10))
-    ax.imshow(img) # Pone la foto de fondo
     
-    # Calculamos el paso exacto para que sean equidistantes
-    paso = radio_60 / 6.0
+    # Slider para la marca de 60 grados
+    x60 = st.sidebar.slider("Alinear con Marca 60°", cx, w, cx + (w // 4))
+    
+    # MATEMÁTICA PURA PARA EQUIDISTANCIA
+    distancia_total = x60 - cx
+    paso_10 = distancia_total / 6.0  # Dividimos por 6 para tener marcas de 10°
 
-    # Dibujamos los 6 anillos en ROJO PURO
+    # --- DIBUJO DE ANILLOS ---
+    # Dibujamos de 10° a 60° (6 anillos)
     for i in range(1, 7):
-        r = i * paso
-        # 'color="red"' en Matplotlib es un comando absoluto, no depende de la imagen
-        circulo = plt.Circle((cx, cy), r, color='red', fill=False, linewidth=3)
-        ax.add_patch(circulo)
+        radio = paso_10 * i
         
-        # Agregamos el número para verificar la marca
-        ax.text(cx + r, cy, f"{i*10}", color='red', fontsize=10, fontweight='bold')
+        # Definimos el área del círculo (Bounding box)
+        left = cx - radio
+        top = cy - radio
+        right = cx + radio
+        bottom = cy + radio
+        
+        # DIBUJO ROJO INTENSO (RGB: 255, 0, 0)
+        # Usamos un ancho de 5 para que sea imposible no verlo
+        draw.ellipse([left, top, right, bottom], outline=(255, 0, 0), width=5)
+        
+        # Dibujar marcas de los ejes en cada anillo
+        draw.line([cx - 10, cy + radio, cx + 10, cy + radio], fill=(255, 0, 0), width=2)
 
-    # Dibujamos los ejes en rojo
-    ax.axhline(cy, color='red', linewidth=1, alpha=0.5)
-    ax.axvline(cx, color='red', linewidth=1, alpha=0.5)
+    # Ejes cartesianos centrales
+    draw.line([cx, 0, cx, h], fill=(255, 0, 0), width=2) # Eje Vertical
+    draw.line([0, cy, w, cy], fill=(255, 0, 0), width=2) # Eje Horizontal
 
-    ax.axis('off') # Quitamos los números de los bordes para ver solo el informe
+    # --- MOSTRAR RESULTADO ---
+    st.image(img, use_container_width=True)
     
-    # 4. Mostrar resultado
-    st.pyplot(fig)
-    
-    st.info(f"Cada marca de 10° está a una distancia de {round(paso, 2)} píxeles.")
+    st.success(f"Unidad de 10 grados: {round(paso_10, 2)} píxeles. Todos los anillos son equidistantes.")
 
 else:
-    st.write("Por favor, sube una imagen en el menú lateral.")
+    st.info("Subí el informe para activar la grilla roja.")
