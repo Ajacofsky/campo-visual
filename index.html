@@ -1,60 +1,54 @@
 import streamlit as st
-import cv2
 import numpy as np
-import matplotlib.pyplot as plt
+import cv2
+from matplotlib import pyplot as plt
 
 st.set_page_config(layout="wide")
-st.title("⚖️ Sistema de Peritaje - Calibración Vectorial")
 
-file = st.sidebar.file_uploader("Subir Informe", type=['jpg', 'png', 'jpeg'])
+st.sidebar.title("Configuración de Grilla")
+file = st.sidebar.file_uploader("Subir informe", type=['jpg', 'png', 'jpeg'])
 
 if file:
-    # 1. Cargar imagen y convertir a RGB (importante para que no cambien los colores)
+    # 1. Cargar imagen
     file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # Asegurar formato de color correcto
     h, w, _ = img.shape
 
-    # 2. Controles laterales
-    st.sidebar.header("🎯 Ajuste Manual")
+    # 2. Sliders de control
     cx = st.sidebar.slider("Centro X", 0, w, w // 2)
     cy = st.sidebar.slider("Centro Y", 0, h, h // 2)
+    # Este slider define la distancia al 60. 
+    # El programa dividirá automáticamente por 6 para crear los 10, 20, 30, 40, 50.
+    radio_60 = st.sidebar.slider("Radio hasta Marca 60°", 10, w // 2, 200)
+
+    # 3. Dibujo con Matplotlib (Esto fuerza el color ROJO)
+    fig, ax = plt.subplots(figsize=(10, 10))
+    ax.imshow(img) # Pone la foto de fondo
     
-    # Este slider controla el radio total (Marca 60)
-    radio_60 = st.sidebar.slider("Radio hasta la marca 60°", 50, w // 2, 200)
-
-    # 3. Crear el gráfico con Matplotlib (Esto garantiza el color ROJO)
-    fig, ax = plt.subplots(figsize=(12, 12))
-    ax.imshow(img) # La imagen de fondo
-
-    # MATEMÁTICA: Dibujamos 6 anillos equidistantes (10, 20, 30, 40, 50, 60)
-    # El radio de cada uno es (Radio_60 / 6) * i
+    # Calculamos el paso exacto para que sean equidistantes
     paso = radio_60 / 6.0
 
+    # Dibujamos los 6 anillos en ROJO PURO
     for i in range(1, 7):
-        # Dibujamos círculos ROJOS INTENSOS
-        circulo = plt.Circle((cx, cy), i * paso, color='red', fill=False, linewidth=3.5)
+        r = i * paso
+        # 'color="red"' en Matplotlib es un comando absoluto, no depende de la imagen
+        circulo = plt.Circle((cx, cy), r, color='red', fill=False, linewidth=3)
         ax.add_patch(circulo)
-        # Etiquetas de grado para que no haya duda
-        ax.text(cx + (i * paso), cy, f"{i*10}°", color='red', weight='bold', fontsize=12)
+        
+        # Agregamos el número para verificar la marca
+        ax.text(cx + r, cy, f"{i*10}", color='red', fontsize=10, fontweight='bold')
 
-    # Dibujamos los ejes radiales cada 45 grados
-    for ang in range(0, 360, 45):
-        rad = np.radians(ang)
-        ax.plot([cx, cx + radio_60 * np.cos(rad)], 
-                [cy, cy + radio_60 * np.sin(rad)], 
-                color='red', lw=1.5, linestyle='--')
+    # Dibujamos los ejes en rojo
+    ax.axhline(cy, color='red', linewidth=1, alpha=0.5)
+    ax.axvline(cx, color='red', linewidth=1, alpha=0.5)
 
-    # Cruz del centro
-    ax.plot(cx, cy, 'r+', markersize=25, markeredgewidth=4)
-
-    # Configuración de visualización
-    ax.axis('off')
-    plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
-
-    # 4. Mostrar en Streamlit
+    ax.axis('off') # Quitamos los números de los bordes para ver solo el informe
+    
+    # 4. Mostrar resultado
     st.pyplot(fig)
+    
+    st.info(f"Cada marca de 10° está a una distancia de {round(paso, 2)} píxeles.")
 
-    st.success(f"Grilla calibrada: Cada anillo está separado por {round(paso, 2)} píxeles exactos.")
 else:
-    st.warning("Por favor, subí la imagen para ver la grilla roja.")
+    st.write("Por favor, sube una imagen en el menú lateral.")
