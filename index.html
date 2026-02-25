@@ -2,86 +2,86 @@ import streamlit as st
 import cv2
 import numpy as np
 
-st.set_page_config(layout="wide", page_title="Peritaje Pro V22")
-st.title("⚖️ Calibración Equidistante de Precisión")
+st.set_page_config(layout="wide", page_title="Peritaje Pro V23")
 
-img_file = st.sidebar.file_uploader("1. Subir Informe", type=['jpg', 'png', 'jpeg'])
+# --- INTERFAZ DE CONTROL ---
+st.sidebar.title("📏 Calibración de Ejes")
+img_file = st.sidebar.file_uploader("Subir Informe", type=['jpg', 'png', 'jpeg'])
 
 if img_file:
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     img_orig = cv2.imdecode(file_bytes, 1)
     h, w = img_orig.shape[:2]
 
-    # --- CALIBRACIÓN POR EJES (3 PUNTOS) ---
-    st.sidebar.header("🎯 1. Ubicar el Centro (0,0)")
-    cx = st.sidebar.slider("Centro X", 0, w, w // 2)
-    cy = st.sidebar.slider("Centro Y", 0, h, h // 2)
+    # 1. POSICIONAMIENTO DEL CENTRO (0,0)
+    cx = st.sidebar.slider("Centro Horizontal (X)", 0, w, w // 2)
+    cy = st.sidebar.slider("Centro Vertical (Y)", 0, h, h // 2)
 
-    st.sidebar.header("📏 2. Ajustar Límite 60°")
-    # Este slider define la distancia al 60. El programa dividirá por 6 automáticamente.
-    x60 = st.sidebar.slider("Posición Marca 60° (Eje X)", cx, w, cx + 300)
+    # 2. ANCLAJE A LA MARCA DE 60 GRADOS
+    # Movemos este slider hasta que la marca guía coincida con el '60' del papel
+    x60 = st.sidebar.slider("Ajustar a Marca 60°", cx, w, cx + 250)
     
-    # Calculamos la unidad base: Píxeles por cada 10 grados
-    px_cada_10 = (x60 - cx) / 6
+    # LÓGICA MATEMÁTICA: La distancia total se divide por 6 para obtener pasos de 10°
+    distancia_total = x60 - cx
+    px_cada_10 = distancia_total / 6
 
-    st.sidebar.header("🔬 3. Parámetros de Análisis")
-    umbral = st.sidebar.slider("Sensibilidad Negros", 50, 255, 140)
-    opacidad = st.sidebar.slider("Opacidad de Colores", 0.0, 1.0, 0.4)
+    # 3. DETECCIÓN
+    umbral = st.sidebar.slider("Sensibilidad de Cuadrados Negros", 50, 255, 140)
 
-    # --- PROCESAMIENTO ---
+    # --- RENDERIZADO DE ALTA VISIBILIDAD ---
+    img_res = img_orig.copy()
     gris = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
     _, binaria = cv2.threshold(gris, umbral, 255, cv2.THRESH_BINARY_INV)
     
-    img_res = img_orig.copy()
     puntos_totales = 0
 
-    # Dibujamos los 6 anillos (aunque calculamos solo hasta 40, dibujamos 6 para validar 60)
+    # Dibujamos los 6 anillos para validar la escala, pero evaluamos solo 4 (10° a 40°)
     for i in range(1, 7):
-        r_ext = int(i * px_cada_10)
-        r_int = int((i - 1) * px_cada_10)
+        radio = int(i * px_cada_10)
+        radio_int = int((i - 1) * px_cada_10)
         
-        # Grosor mayor para los anillos centrales para que no se pierdan
-        grosor = 3 if i <= 4 else 1
-        color_linea = (0, 0, 0) # Negro puro
+        # DIBUJO DE ANILLO NEGRO PURO (Sin transparencia, grosor fuerte)
+        cv2.circle(img_res, (cx, cy), radio, (0, 0, 0), 3)
 
-        # Analizar sectores (SOLO para los primeros 4 anillos: 10°, 20°, 30°, 40°)
+        # EVALUACIÓN DE SECTORES (Solo hasta el 4to anillo / 40 grados)
         if i <= 4:
             for s in range(8):
                 ang = s * 45
                 mask = np.zeros((h, w), dtype=np.uint8)
-                cv2.ellipse(mask, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, 255, -1)
-                cv2.circle(mask, (cx, cy), r_int, 0, -1)
+                cv2.ellipse(mask, (cx, cy), (radio, radio), 0, ang, ang + 45, 255, -1)
+                cv2.circle(mask, (cx, cy), radio_int, 0, -1)
                 
-                area_negra = np.count_nonzero(cv2.bitwise_and(binaria, mask))
+                # Análisis de masa negra
+                sector_negro = cv2.bitwise_and(binaria, mask)
+                area_negra = np.count_nonzero(sector_negro)
                 area_total = np.count_nonzero(mask)
                 
                 if area_total > 0:
-                    ocu = (area_negra / area_total) * 100
-                    col, pts = None, 0
-                    if ocu >= 8: col, pts = (0, 255, 255), 10
-                    elif 1.2 < ocu < 8: col, pts = (255, 255, 0), 5
+                    ocupacion = (area_negra / area_total) * 100
+                    color, pts = None, 0
                     
-                    if col:
+                    if ocupacion >= 8: # Bloque sólido
+                        color, pts = (0, 255, 255), 10 # Amarillo
+                    elif 1.2 < ocupacion < 8: # Punto o borde
+                        color, pts = (255, 255, 0), 5  # Celeste
+                    
+                    if color:
                         puntos_totales += pts
                         overlay = img_res.copy()
-                        cv2.ellipse(overlay, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, col, -1)
-                        cv2.circle(overlay, (cx, cy), r_int, (255,255,255), -1)
-                        img_res = cv2.addWeighted(overlay, opacidad, img_res, 1 - opacidad, 0)
+                        cv2.ellipse(overlay, (cx, cy), (radio, radio), 0, ang, ang + 45, color, -1)
+                        img_res = cv2.addWeighted(overlay, 0.4, img_res, 0.6, 0)
 
-        # Dibujar el círculo NEGRO sólido (Súper visible)
-        cv2.circle(img_res, (cx, cy), r_ext, color_linea, grosor)
-        
-        # Dibujar líneas radiales para los sectores
-        for s in range(8):
-            rad = np.radians(s * 45)
-            x_end = int(cx + (6 * px_cada_10) * np.cos(rad))
-            y_end = int(cy + (6 * px_cada_10) * np.sin(rad))
-            cv2.line(img_res, (cx, cy), (x_end, y_end), (0, 0, 0), 1)
+    # DIBUJO DE EJES CARTESIANOS NEGROS
+    cv2.line(img_res, (cx, 0), (cx, h), (0, 0, 0), 2)
+    cv2.line(img_res, (0, cy), (w, cy), (0, 0, 0), 2)
+    
+    # MARCA DE REFERENCIA EN 60° (Para validar que la escala es correcta)
+    cv2.drawMarker(img_res, (x60, cy), (0, 0, 255), cv2.MARKER_TRIANGLE_DOWN, 20, 3)
 
-    # Marca de Centro y Guía de 60
-    cv2.drawMarker(img_res, (cx, cy), (0, 0, 255), cv2.MARKER_CROSS, 40, 3)
-    cv2.drawMarker(img_res, (int(cx + 6*px_cada_10), cy), (255, 0, 0), cv2.MARKER_TRIANGLE_UP, 20, 2)
-
-    # --- SALIDA ---
+    # --- RESULTADOS ---
     st.subheader(f"📊 Suma: {puntos_totales} pts | Incapacidad: {round((puntos_totales/320)*100, 1)}%")
     st.image(cv2.cvtColor(img_res, cv2.COLOR_BGR2RGB), use_container_width=True)
+    st.info("Mueve el slider 'Ajustar a Marca 60°' hasta que el triángulo rojo toque la marca de 60 de tu informe.")
+
+else:
+    st.info("Subí el archivo para aplicar la grilla equidistante.")
