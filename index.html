@@ -5,111 +5,48 @@ from streamlit_image_coordinates import streamlit_image_coordinates
 
 st.set_page_config(layout="wide", page_title="Peritaje Pro - Calibración Manual")
 
-# --- GESTIÓN DE ESTADO ---
-if "puntos" not in st.session_state:
-    st.session_state.puntos = []
-if "punto_actual" not in st.session_state:
-    st.session_state.punto_actual = None
+# Gestión de estado persistente
+if "centro" not in st.session_state: st.session_state.centro = None
+if "x60" not in st.session_state: st.session_state.x60 = None
+if "y60" not in st.session_state: st.session_state.y60 = None
 
-def guardar_punto():
-    if st.session_state.punto_actual:
-        st.session_state.puntos.append(st.session_state.punto_actual)
-        st.session_state.punto_actual = None
+def reset_all():
+    st.session_state.centro = None
+    st.session_state.x60 = None
+    st.session_state.y60 = None
 
-def reset():
-    st.session_state.puntos = []
-    st.session_state.punto_actual = None
-
-# --- INTERFAZ ---
-st.sidebar.title("Configuración")
-img_file = st.sidebar.file_uploader("Subir Campo Visual", type=['jpg', 'png', 'jpeg'])
-st.sidebar.button("🔄 Reiniciar Todo", on_click=reset)
+img_file = st.sidebar.file_uploader("Subir Imagen", type=['jpg', 'png', 'jpeg'])
+st.sidebar.button("🔄 Reiniciar Todo", on_click=reset_all)
 
 if img_file is not None:
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     img_orig = cv2.imdecode(file_bytes, 1)
     
-    n_puntos = len(st.session_state.puntos)
+    # Selector de paso activo
+    paso = st.radio("Seleccioná el paso a calibrar:", ["Centro", "Margen Derecho (60°)", "Margen Superior (60°)"], horizontal=True)
+    
+    # Captura de coordenadas
+    val = streamlit_image_coordinates(img_orig, key="canvas")
+    
+    if val:
+        coords = (val["x"], val["y"])
+        if paso == "Centro": st.session_state.centro = coords
+        if paso == "Margen Derecho (60°)": st.session_state.x60 = coords
+        if paso == "Margen Superior (60°)": st.session_state.y60 = coords
+        st.write(f"Coordenadas guardadas para {paso}: {coords}")
 
-    # Mensajes de guía
-    pasos = [
-        "🎯 PASO 1: Marcá el CENTRO (Cruce 0,0)",
-        "➡️ PASO 2: Marcá la marca de 60° DERECHA (Eje X)",
-        "⬆️ PASO 3: Marcá la marca de 60° ARRIBA (Eje Y)"
-    ]
+    # Visualización de lo marcado
+    img_viz = img_orig.copy()
+    if st.session_state.centro: cv2.drawMarker(img_viz, st.session_state.centro, (255, 0, 0), cv2.MARKER_CROSS, 30, 3)
+    if st.session_state.x60: cv2.drawMarker(img_viz, st.session_state.x60, (0, 255, 0), cv2.MARKER_CROSS, 30, 3)
+    if st.session_state.y60: cv2.drawMarker(img_viz, st.session_state.y60, (0, 0, 255), cv2.MARKER_CROSS, 30, 2)
+    
+    st.image(cv2.cvtColor(img_viz, cv2.COLOR_BGR2RGB))
 
-    if n_puntos < 3:
-        st.subheader(pasos[n_puntos])
-        
-        # Dibujar lo ya confirmado + lo que se está eligiendo ahora
-        img_view = img_orig.copy()
-        for p in st.session_state.puntos:
-            cv2.drawMarker(img_view, p, (0, 255, 0), cv2.MARKER_CROSS, 30, 2)
-        
-        # Captura de coordenadas
-        value = streamlit_image_coordinates(img_view, key=f"canvas_{n_puntos}")
-        
-        if value:
-            st.session_state.punto_actual = (value["x"], value["y"])
-            st.write(f"Seleccionado: {st.session_state.punto_actual}")
-            st.button("✅ Confirmar y Siguiente", on_click=guardar_punto)
-            
-            # Dibujar preview del punto actual
-            cv2.circle(img_view, st.session_state.punto_actual, 10, (0, 0, 255), -1)
-            st.image(cv2.cvtColor(img_view, cv2.COLOR_BGR2RGB), use_container_width=True)
-    else:
-        # --- CÁLCULO FINAL CON LOS 3 PUNTOS ---
-        st.success("🎉 Calibración Finalizada")
-        cx, cy = st.session_state.puntos[0]
-        x60d, y60d = st.session_state.puntos[1]
-        x60a, y60a = st.session_state.puntos[2]
-
-        # Calculamos escala (basado en tu regla de dividir por 6 para tener 10°)
-        px_10_x = np.abs(x60d - cx) / 6
-        px_10_y = np.abs(y60a - cy) / 6
-
-        # Procesamiento para detectar cuadrados
-        gris = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
-        _, binaria = cv2.threshold(gris, 140, 255, cv2.THRESH_BINARY_INV)
-        
-        img_res = img_orig.copy()
-        total_puntos = 0
-
-        # Dibujamos y evaluamos los 4 anillos (40°)
-        for i in range(1, 5):
-            rx = int(i * px_10_x)
-            ry = int(i * px_10_y)
-            rx_in = int((i-1) * px_10_x)
-            ry_in = int((i-1) * px_10_y)
-            
-            for s in range(8):
-                ang = s * 45
-                mask = np.zeros(img_orig.shape[:2], dtype=np.uint8)
-                cv2.ellipse(mask, (cx, cy), (rx, ry), 0, ang, ang + 45, 255, -1)
-                cv2.ellipse(mask, (cx, cy), (rx_in, ry_in), 0, 0, 360, 0, -1)
-                
-                # Contar masa sólida
-                masa = np.count_nonzero(cv2.bitwise_and(binaria, mask))
-                area_sec = np.count_nonzero(mask)
-                if area_sec > 0:
-                    ocupacion = (masa / area_sec) * 100
-                    color, pts = None, 0
-                    if ocupacion > 8: # Amarillo (10 pts)
-                        color, pts = (0, 255, 255), 10
-                    elif 1.2 < ocupacion <= 8: # Celeste (5 pts)
-                        color, pts = (255, 255, 0), 5
-                    
-                    if color:
-                        total_puntos += pts
-                        overlay = img_res.copy()
-                        cv2.ellipse(overlay, (cx, cy), (rx, ry), 0, ang, ang + 45, color, -1)
-                        cv2.ellipse(overlay, (cx, cy), (rx_in, ry_in), 0, 0, 360, (255,255,255), -1)
-                        img_res = cv2.addWeighted(overlay, 0.4, img_res, 0.6, 0)
-
-            cv2.ellipse(img_res, (cx, cy), (rx, ry), 0, 0, 360, (200, 200, 200), 1)
-
-        st.markdown(f"## 📊 Total: {total_puntos} pts | Incapacidad: {round((total_puntos/320)*100, 1)}%")
-        st.image(cv2.cvtColor(img_res, cv2.COLOR_BGR2RGB), use_container_width=True)
-
+    # Botón de Procesar solo si están los 3 puntos
+    if st.session_state.centro and st.session_state.x60 and st.session_state.y60:
+        if st.button("🚀 CALCULAR INCAPACIDAD"):
+            st.success("Calculando...")
+            # (Aquí iría el motor de detección de cuadrados sobre img_orig...)
 else:
-    st.info("Subí la imagen para comenzar.")
+    st.info("Subí la imagen para empezar.")
