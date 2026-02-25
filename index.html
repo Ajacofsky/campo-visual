@@ -4,60 +4,66 @@ from PIL import Image
 import io
 
 st.set_page_config(layout="wide")
-st.title("⚖️ Calibración Vectorial Absoluta")
+st.title("🎯 Calibración de Anillos Equidistantes (Rojo Neón)")
 
-file = st.sidebar.file_uploader("1. Subir Informe", type=['jpg', 'png', 'jpeg'])
+# Forzar limpieza visual
+st.sidebar.button("🔄 Refrescar Aplicación")
+
+file = st.sidebar.file_uploader("1. Subir Informe", type=['jpg', 'png', 'jpeg'], key="subidor_unico")
 
 if file:
-    # --- PROCESAMIENTO DE IMAGEN ---
-    img = Image.open(file)
+    # 1. Cargar y procesar imagen
+    img = Image.open(file).convert("RGB")
     w, h = img.size
     
-    # Convertimos la imagen a base64 para mostrarla en HTML
     buffered = io.BytesIO()
     img.save(buffered, format="JPEG")
     img_str = base64.b64encode(buffered.getvalue()).decode()
 
-    # --- CONTROLES ---
-    st.sidebar.header("🎯 Ajustes de Grilla")
-    cx = st.sidebar.slider("Centro X", 0, w, w // 2)
-    cy = st.sidebar.slider("Centro Y", 0, h, h // 2)
+    # 2. Sliders de precisión
+    st.sidebar.header("📏 Parámetros de Escala")
+    cx = st.sidebar.slider("Centro X", 0, w, w // 2, key="cx")
+    cy = st.sidebar.slider("Centro Y", 0, h, h // 2, key="cy")
     
-    # El usuario define el límite de 60 grados
-    r60 = st.sidebar.slider("Radio hasta Marca 60°", 10, w // 2, 200)
+    # Este slider controla la posición del anillo de 60°
+    # Al moverlo, los de 10, 20, 30, 40 y 50 se mueven proporcionalmente.
+    x60_marca = st.sidebar.slider("Alinear con Marca 60° del papel", cx, w, cx + 200, key="x60")
     
-    # Matemática: Paso equidistante
-    paso = r60 / 6.0
+    # MATEMÁTICA DE EQUIDISTANCIA ABSOLUTA
+    distancia_al_60 = float(x60_marca - cx)
+    unidad_10deg = distancia_al_60 / 6.0
 
-    # --- GENERACIÓN DE SVG (Capa Roja) ---
-    # Creamos los 6 anillos y los ejes en código de dibujo puro
-    anillos_svg = ""
+    # 3. CONSTRUCCIÓN DE LA CAPA ROJA (SVG)
+    # Usamos color Hexadecimal #FF0000 para evitar errores de interpretación
+    capa_roja = ""
+    
+    # Dibujamos los 6 anillos (10° a 60°)
     for i in range(1, 7):
-        radio = i * paso
-        anillos_svg += f'<circle cx="{cx}" cy="{cy}" r="{radio}" stroke="red" stroke-width="4" fill="none" />'
-        anillos_svg += f'<text x="{cx + radio}" y="{cy - 5}" fill="red" font-size="20" font-weight="bold">{i*10}°</text>'
+        r = i * unidad_10deg
+        # Círculos con borde rojo neón muy grueso (5px)
+        capa_roja += f'<circle cx="{cx}" cy="{cy}" r="{r}" stroke="#FF0000" stroke-width="5" fill="none" />'
+        # Etiquetas de control
+        capa_roja += f'<text x="{cx + r}" y="{cy - 10}" fill="#FF0000" font-size="24" font-weight="bold">{i*10}°</text>'
 
-    # Ejes en rojo
-    ejes_svg = f"""
-        <line x1="{cx}" y1="0" x2="{cx}" y2="{h}" stroke="red" stroke-width="2" />
-        <line x1="0" y1="{cy}" x2="{w}" y2="{cy}" stroke="red" stroke-width="2" />
-    """
+    # Ejes principales en Rojo
+    capa_roja += f'<line x1="{cx}" y1="0" x2="{cx}" y2="{h}" stroke="#FF0000" stroke-width="3" />'
+    capa_roja += f'<line x1="0" y1="{cy}" x2="{w}" y2="{cy}" stroke="#FF0000" stroke-width="3" />'
 
-    # --- RENDERIZADO FINAL (Imagen + Grilla) ---
-    html_code = f"""
-    <div style="position: relative; width: 100%; height: auto;">
+    # 4. RENDERIZADO HTML (Imagen + SVG)
+    html_display = f"""
+    <div style="position: relative; border: 5px solid #FF0000;">
         <img src="data:image/jpeg;base64,{img_str}" style="width: 100%; height: auto; display: block;" />
         <svg viewBox="0 0 {w} {h}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;">
-            {ejes_svg}
-            {anillos_svg}
-            <circle cx="{cx}" cy="{cy}" r="5" fill="red" />
+            {capa_roja}
+            <circle cx="{cx}" cy="{cy}" r="8" fill="#FF0000" />
         </svg>
     </div>
     """
 
-    st.components.v1.html(html_code, height=800, scrolling=True)
+    st.components.v1.html(html_display, height=900, scrolling=True)
     
-    st.success(f"Grilla generada. Distancia entre marcas de 10°: {round(paso, 2)} píxeles.")
+    st.sidebar.write(f"🔍 **Info de Escala:**")
+    st.sidebar.write(f"Distancia entre marcas: {round(unidad_10deg, 1)} px")
 
 else:
-    st.info("Sube una imagen para ver la grilla roja vectorial.")
+    st.info("Subí la imagen para ver los anillos rojos.")
