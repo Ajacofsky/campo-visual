@@ -1,93 +1,65 @@
 import streamlit as st
-import cv2
 import numpy as np
+import cv2
+from matplotlib import pyplot as plt
 
-st.set_page_config(layout="wide", page_title="Peritaje Pro V29")
-st.title("⚖️ Calibración Equidistante - Grilla Roja")
+st.set_page_config(layout="wide", page_title="Peritaje Pro V30")
+st.title("⚖️ Calibración por Gráfico de Precisión (Matplotlib)")
 
 img_file = st.sidebar.file_uploader("Subir Informe", type=['jpg', 'png', 'jpeg'])
 
 if img_file:
-    # Carga de imagen
+    # 1. CARGA DE IMAGEN
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
-    img_orig = cv2.imdecode(file_bytes, 1)
-    h, w = img_orig.shape[:2]
+    img = cv2.imdecode(file_bytes, 1)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # Convertimos a RGB para Matplotlib
+    h, w, _ = img.shape
 
-    # --- CONTROLES ---
-    st.sidebar.subheader("🎯 1. Ubicar Centro")
-    cx = st.sidebar.slider("Centro X", 0, w, w // 2)
-    cy = st.sidebar.slider("Centro Y", 0, h, h // 2)
+    # 2. CONTROLES DE POSICIÓN (Basados en proporción 0-100 para evitar errores de píxel)
+    st.sidebar.header("🎯 1. Ubicar Centro")
+    cx = st.sidebar.slider("Centro Horizontal %", 0, 100, 50) / 100 * w
+    cy = st.sidebar.slider("Centro Vertical %", 0, 100, 50) / 100 * h
 
-    st.sidebar.subheader("📏 2. Ajustar Escala")
-    # Este punto debe coincidir con la marca de 60° del informe
-    x60 = st.sidebar.slider("Alinear con Marca 60°", cx, w, cx + 250)
+    st.sidebar.header("📏 2. Ajustar Marca 60°")
+    # Movemos este slider hasta que el círculo exterior pise el '60' del papel
+    ancla_60 = st.sidebar.slider("Radio hasta Marca 60°", 10, w//2, 200)
+
+    # MATEMÁTICA PURA: Dividimos el radio del 60 en 6 partes iguales
+    radio_paso = ancla_60 / 6.0
+
+    # 3. CREACIÓN DEL GRÁFICO (Nueva Perspectiva)
+    fig, ax = plt.subplots(figsize=(10, 10))
     
-    # MATEMÁTICA: Equidistancia garantizada (división por 6)
-    distancia_60 = float(x60 - cx)
-    px_cada_10 = distancia_60 / 6.0
+    # Mostramos la imagen de fondo
+    ax.imshow(img)
 
-    st.sidebar.subheader("🔬 3. Detección")
-    umbral = st.sidebar.slider("Umbral de Negros", 50, 255, 140)
-
-    # --- PROCESAMIENTO ---
-    # Creamos una copia para los colores de fondo (Sectores)
-    img_color = img_orig.copy()
-    gris = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
-    _, binaria = cv2.threshold(gris, umbral, 255, cv2.THRESH_BINARY_INV)
-    
-    puntos_totales = 0
-
-    # 1. PINTAR SECTORES (Primero los colores para que queden de fondo)
-    for i in range(1, 5):
-        r_ext = int(i * px_cada_10)
-        r_int = int((i - 1) * px_cada_10)
-        for s in range(8):
-            ang = s * 45
-            mask = np.zeros((h, w), dtype=np.uint8)
-            cv2.ellipse(mask, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, 255, -1)
-            cv2.circle(mask, (cx, cy), r_int, 0, -1)
-            area_negra = np.count_nonzero(cv2.bitwise_and(binaria, mask))
-            area_total = np.count_nonzero(mask)
-            
-            if area_total > 0:
-                ocu = (area_negra / area_total) * 100
-                if ocu >= 8: # Amarillo
-                    overlay = img_color.copy()
-                    cv2.ellipse(overlay, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, (0, 255, 255), -1)
-                    img_color = cv2.addWeighted(overlay, 0.4, img_color, 0.6, 0)
-                    puntos_totales += 10
-                elif 1.2 < ocu < 8: # Celeste
-                    overlay = img_color.copy()
-                    cv2.ellipse(overlay, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, (255, 255, 0), -1)
-                    img_color = cv2.addWeighted(overlay, 0.4, img_color, 0.6, 0)
-                    puntos_totales += 5
-
-    # 2. DIBUJAR GRILLA ROJA (Al final, encima de todo)
-    # Definimos ROJO PURO en formato BGR para OpenCV
-    ROJO_INTENSO = (0, 0, 255) 
-    
-    # Anillos equidistantes (10, 20, 30, 40, 50, 60)
+    # Dibujamos los anillos CON MATPLOTLIB (Líneas vectoriales, no píxeles)
+    # Dibujamos 6 anillos equidistantes
     for i in range(1, 7):
-        radio = int(i * px_cada_10)
-        cv2.circle(img_color, (cx, cy), radio, ROJO_INTENSO, 4) # Grosor 4
+        radio = i * radio_paso
+        circulo = plt.Circle((cx, cy), radio, color='red', fill=False, linewidth=3, alpha=0.9)
+        ax.add_patch(circulo)
+        # Etiqueta de grado
+        ax.text(cx + radio, cy, f"{i*10}°", color='red', fontsize=10, fontweight='bold')
 
-    # Ejes y divisiones de sectores en ROJO
-    for s in range(8):
-        rad = np.radians(s * 45)
-        x_end = int(cx + (6 * px_cada_10) * np.cos(rad))
-        y_end = int(cy + (6 * px_cada_10) * np.sin(rad))
-        cv2.line(img_color, (cx, cy), (x_end, y_end), ROJO_INTENSO, 2)
+    # Dibujamos los ejes radiales (cada 45°)
+    for angulo in range(0, 360, 45):
+        rad = np.radians(angulo)
+        x_fin = cx + (ancla_60) * np.cos(rad)
+        y_fin = cy + (ancla_60) * np.sin(rad)
+        ax.plot([cx, x_fin], [cy, y_fin], color='red', lw=1.5, alpha=0.7)
 
-    # Marca de centro
-    cv2.drawMarker(img_color, (cx, cy), (255, 255, 255), cv2.MARKER_CROSS, 30, 2)
+    # Marca del centro
+    ax.plot(cx, cy, 'r+', markersize=20, markeredgewidth=3)
 
-    # --- RESULTADO FINAL ---
-    st.subheader(f"📊 Suma: {puntos_totales} pts | Incapacidad: {round((puntos_totales/320)*100, 1)}%")
-    # IMPORTANTE: Convertimos de BGR a RGB para que Streamlit muestre el Rojo correctamente
-    img_final = cv2.cvtColor(img_color, cv2.COLOR_BGR2RGB)
-    st.image(img_final, use_container_width=True)
+    # Estética del gráfico
+    ax.axis('off') # Ocultar ejes de coordenadas de la foto
+    plt.tight_layout(pad=0)
+
+    # 4. MOSTRAR EN STREAMLIT
+    st.pyplot(fig)
     
-    st.success(f"Equidistancia: {round(px_cada_10, 2)} píxeles por cada 10 grados.")
+    st.success(f"Equidistancia: {round(radio_paso, 2)} unidades entre anillos.")
 
 else:
-    st.info("Subí la imagen para ver la grilla roja.")
+    st.info("Subí la imagen para generar la grilla vectorial roja.")
