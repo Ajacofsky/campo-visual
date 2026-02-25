@@ -1,90 +1,93 @@
 import streamlit as st
 import cv2
 import numpy as np
-from streamlit_image_coordinates import streamlit_image_coordinates
 
-st.set_page_config(layout="wide", page_title="Peritaje Pro V17")
+st.set_page_config(layout="wide", page_title="Peritaje Pro V18")
+st.title("⚖️ Analizador de Incapacidad - Calibración Garantizada")
 
-# --- MEMORIA DE ESTADO ---
-if "centro" not in st.session_state: st.session_state.centro = None
-if "punto60" not in st.session_state: st.session_state.punto60 = None
-if "fijar_centro" not in st.session_state: st.session_state.fijar_centro = False
-
-st.title("⚖️ Analizador de Incapacidad")
-
-img_file = st.sidebar.file_uploader("Subir Informe", type=['jpg', 'png', 'jpeg'])
+# --- CARGA DE ARCHIVO ---
+img_file = st.sidebar.file_uploader("1. Subí el Informe", type=['jpg', 'png', 'jpeg'])
 
 if img_file:
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     img_orig = cv2.imdecode(file_bytes, 1)
     h, w = img_orig.shape[:2]
 
-    # --- LÓGICA DE INTERFAZ ---
-    if not st.session_state.fijar_centro:
-        st.subheader("🎯 PASO 1: Ubicá el Centro (0,0)")
-        st.info("Hacé clic en la cruz central. Cuando esté bien ubicado, presioná el botón 'FIJAR CENTRO'.")
-    else:
-        st.subheader("➡️ PASO 2: Ubicá la marca de 60° (Eje X)")
-        st.warning("El centro está bloqueado. Ahora hacé clic donde dice '60' en el eje horizontal.")
+    st.sidebar.markdown("---")
+    st.sidebar.header("🎯 Ajuste del Centro")
+    # Sliders para mover el centro pixel por pixel
+    cx = st.sidebar.slider("Posición Horizontal (X)", 0, w, w // 2)
+    cy = st.sidebar.slider("Posición Vertical (Y)", 0, h, h // 2)
 
-    # Dibujar marcas actuales
-    img_draw = img_orig.copy()
-    if st.session_state.centro:
-        cv2.drawMarker(img_draw, st.session_state.centro, (255, 0, 0), cv2.MARKER_CROSS, 40, 2)
-    if st.session_state.punto60:
-        cv2.drawMarker(img_draw, st.session_state.punto60, (0, 0, 255), cv2.MARKER_TACK, 30, 2)
+    st.sidebar.markdown("---")
+    st.sidebar.header("📏 Ajuste de Escala (Marca 60°)")
+    # Slider para mover la marca de 60 grados
+    x60 = st.sidebar.slider("Ubicación marca 60°", 0, w, cx + 100)
 
-    # CAPTURA DE CLIC
-    # Cambiamos la key para que el componente se refresque al cambiar de paso
-    k = "click_centro" if not st.session_state.fijar_centro else "click_60"
-    coords = streamlit_image_coordinates(img_draw, key=k)
+    # --- LÓGICA DE CÁLCULO (Tu regla de 6 partes) ---
+    dist_60 = np.abs(x60 - cx)
+    px_cada_10 = dist_60 / 6
 
-    if coords:
-        p = (coords["x"], coords["y"])
-        if not st.session_state.fijar_centro:
-            st.session_state.centro = p # El clic mueve el centro
-        else:
-            st.session_state.punto60 = p # El clic mueve la marca de 60
-
-    # --- BOTONES DE CONTROL ---
-    col1, col2 = st.columns(2)
-    with col1:
-        if not st.session_state.fijar_centro:
-            if st.button("✅ FIJAR CENTRO"):
-                st.session_state.fijar_centro = True
-                st.rerun()
-        else:
-            if st.button("🔄 CORREGIR CENTRO"):
-                st.session_state.fijar_centro = False
-                st.session_state.punto60 = None
-                st.rerun()
+    # --- PROCESAMIENTO DE IMAGEN ---
+    umbral = st.sidebar.slider("Sensibilidad de Cuadrados Negros", 50, 255, 140)
+    gris = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
+    _, binaria = cv2.threshold(gris, umbral, 255, cv2.THRESH_BINARY_INV)
     
-    with col2:
-        if st.sidebar.button("🗑️ Reset Total"):
-            st.session_state.centro = None
-            st.session_state.punto60 = None
-            st.session_state.fijar_centro = False
-            st.rerun()
+    # Limpieza de ruido
+    kernel = np.ones((3,3), np.uint8)
+    binaria = cv2.morphologyEx(binaria, cv2.MORPH_OPEN, kernel)
 
-    # --- PROCESAMIENTO FINAL (Solo si ambos puntos existen) ---
-    if st.session_state.centro and st.session_state.punto60:
-        cx, cy = st.session_state.centro
-        x60, y60 = st.session_state.punto60
-        
-        # Tal como pediste: dividir la distancia al 60 por 6 para tener pasos de 10
-        dist_total = np.sqrt((x60-cx)**2 + (y60-cy)**2)
-        px_10 = dist_total / 6
-        
-        res = img_orig.copy()
-        
-        # Dibujar los anillos según tu Word (4 anillos hasta 40°) 
-        for i in range(1, 5):
-            radio = int(i * px_10)
-            cv2.circle(res, (cx, cy), radio, (0, 255, 0), 2)
-            cv2.putText(res, f"{i*10}g", (cx + radio, cy - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
+    img_res = img_orig.copy()
+    total_puntos = 0
 
-        st.image(cv2.cvtColor(res, cv2.COLOR_BGR2RGB), caption="Previsualización de Anillos (10°-40°)")
-        st.success(f"Escala calculada: {round(px_10, 2)} píxeles por cada 10 grados.")
+    # DIBUJO DE LOS 4 ANILLOS (10, 20, 30, 40 grados)
+    for i in range(1, 5):
+        r_ext = int(i * px_cada_10)
+        r_int = int((i-1) * px_por_10_grados if i > 1 else 0) # Error corregido de variable
+        
+        # Dibujar anillo guía
+        cv2.circle(img_res, (cx, cy), r_ext, (200, 200, 200), 1)
+        
+        # Analizar los 8 sectores por anillo
+        for s in range(8):
+            ang = s * 45
+            mask = np.zeros((h, w), dtype=np.uint8)
+            cv2.ellipse(mask, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, 255, -1)
+            if i > 1:
+                cv2.circle(mask, (cx, cy), int((i-1) * px_cada_10), 0, -1)
+            
+            # Conteo de masa negra
+            area_negra = np.count_nonzero(cv2.bitwise_and(binaria, mask))
+            area_total = np.count_nonzero(mask)
+            
+            if area_total > 0:
+                ocupacion = (area_negra / area_total) * 100
+                color, pts = None, 0
+                
+                # Regla: Amarillo (>70% de cuadraditos) | Celeste (<70%)
+                if ocupacion >= 8: # Umbral de masa sólida
+                    color, pts = (0, 255, 255), 10
+                elif 1.2 < ocupacion < 8:
+                    color, pts = (255, 255, 0), 5
+                
+                if color:
+                    total_puntos += pts
+                    overlay = img_res.copy()
+                    cv2.ellipse(overlay, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, color, -1)
+                    img_res = cv2.addWeighted(overlay, 0.4, img_res, 0.6, 0)
+
+    # Marcas de calibración visual
+    cv2.drawMarker(img_res, (cx, cy), (255, 0, 0), cv2.MARKER_CROSS, 30, 2) # Centro Azul
+    cv2.drawMarker(img_res, (x60, cy), (0, 0, 255), cv2.MARKER_TACK, 20, 2) # Marca 60 Roja
+
+    # --- MOSTRAR RESULTADOS ---
+    st.subheader(f"📊 Suma: {total_puntos} pts | Incapacidad: {round((total_puntos/320)*100, 1)}%")
+    st.image(cv2.cvtColor(img_res, cv2.COLOR_BGR2RGB), use_container_width=True)
+    
+    st.write("📖 **Instrucciones:**")
+    st.write("1. Mové los sliders de la izquierda para que la **Cruz Azul** quede en el centro.")
+    st.write("2. Mové el slider de escala hasta que el **Punto Rojo** toque la marca de 60° de tu informe.")
+    st.write("3. Los anillos se ajustarán solos y calcularán la incapacidad.")
 
 else:
-    st.info("Subí la imagen para comenzar la calibración.")
+    st.info("Subí el archivo para ver los controles de calibración.")
