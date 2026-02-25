@@ -3,62 +3,83 @@ import cv2
 import numpy as np
 from streamlit_image_coordinates import streamlit_image_coordinates
 
-# Configuración inicial de memoria
-if "paso" not in st.session_state:
-    st.session_state.paso = 1
-if "puntos" not in st.session_state:
-    st.session_state.puntos = {}
+st.set_page_config(layout="wide", page_title="Peritaje Pro - V16")
 
-st.title("⚖️ Analizador de Incapacidad")
+# --- MEMORIA DEL PROGRAMA ---
+if "puntos_calibracion" not in st.session_state:
+    st.session_state.puntos_calibracion = {} # Diccionario para guardar Centro, X y Y
 
-# --- CABECERA DINÁMICA ---
-# Esto es lo que NO te estaba cambiando. Ahora depende de st.session_state.paso
-if st.session_state.paso == 1:
-    st.header("1. Ubicá el Centro (0,0)")
-elif st.session_state.paso == 2:
-    st.header("2. Ubicá la marca de 60° a la DERECHA")
-elif st.session_state.paso == 3:
-    st.header("3. Ubicá la marca de 60° SUPERIOR")
-else:
-    st.header("✅ Calibración Completa")
+# --- BARRA LATERAL: SELECTOR DE PASO ---
+st.sidebar.title("⚙️ Calibración")
+etapa = st.sidebar.radio(
+    "Seleccioná qué vas a marcar:",
+    ["1. Centro (0,0)", "2. Marca 60° Derecha", "3. Marca 60° Arriba", "4. Ver Resultados"]
+)
 
+if st.sidebar.button("🗑️ Reiniciar Todo"):
+    st.session_state.puntos_calibracion = {}
+    st.rerun()
+
+# --- CARGA DE ARCHIVO ---
 img_file = st.sidebar.file_uploader("Subir Campo Visual", type=['jpg', 'png', 'jpeg'])
 
 if img_file:
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     img_orig = cv2.imdecode(file_bytes, 1)
+    
+    # Titulo dinámico basado en el selector de la izquierda
+    st.header(f"📍 Estás en: {etapa}")
 
-    # Si estamos en proceso de marcar puntos
-    if st.session_state.paso <= 3:
-        # Mostramos la imagen para que el usuario haga clic
-        # Agregamos una 'key' única para cada paso para que el componente se resetee
-        coords = streamlit_image_coordinates(img_orig, key=f"clic_paso_{st.session_state.paso}")
+    if etapa != "4. Ver Resultados":
+        st.info(f"Hacé clic en la imagen para ubicar: {etapa}")
+        
+        # Mostramos lo que ya se marcó para no perderse
+        img_temp = img_orig.copy()
+        for nombre, p in st.session_state.puntos_calibracion.items():
+            cv2.drawMarker(img_temp, p, (0, 0, 255), cv2.MARKER_CROSS, 30, 2)
+            cv2.putText(img_temp, nombre, (p[0]+10, p[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
+
+        # Captura de coordenadas con llave única por etapa
+        coords = streamlit_image_coordinates(img_temp, key=f"input_{etapa}")
         
         if coords:
-            st.session_state.temp_point = (coords["x"], coords["y"])
-            st.write(f"Punto seleccionado: {st.session_state.temp_point}")
+            punto = (coords["x"], coords["y"])
+            st.session_state.puntos_calibracion[etapa] = punto
+            st.success(f"Registrado: {etapa} en {punto}")
+            st.warning("Ahora seleccioná el siguiente paso en la barra lateral ⬅️")
             
-            # EL BOTÓN QUE FUERZA EL CAMBIO
-            if st.button(f"Confirmar Punto {st.session_state.paso} y Continuar"):
-                # Guardamos el punto en el diccionario
-                st.session_state.puntos[st.session_state.paso] = st.session_state.temp_point
-                # Avanzamos el paso
-                st.session_state.paso += 1
-                # Forzamos el reinicio de la página para que cambie el st.header
-                st.rerun()
     else:
-        # --- LÓGICA DE CÁLCULO (Solo cuando ya tenemos los 3 puntos) ---
-        p1 = st.session_state.puntos[1] # Centro
-        p2 = st.session_state.puntos[2] # 60° Derecha
-        
-        # Distancia para calcular los anillos (tu regla de dividir por 6)
-        dist_x = np.abs(p2[0] - p1[0])
-        px_cada_10 = dist_x / 6
-        
-        st.success(f"Calibración exitosa: {round(px_cada_10, 2)} píxeles cada 10°")
-        # Aquí sigue tu código de dibujo de anillos y conteo de negros...
-        
-    if st.sidebar.button("Limpiar y Reiniciar"):
-        st.session_state.paso = 1
-        st.session_state.puntos = {}
-        st.rerun()
+        # --- PROCESAMIENTO FINAL ---
+        if len(st.session_state.puntos_calibracion) < 2:
+            st.error("Faltan marcar puntos (Centro y al menos una marca de 60°).")
+        else:
+            # Recuperar puntos
+            c = st.session_state.puntos_calibracion.get("1. Centro (0,0)")
+            d = st.session_state.puntos_calibracion.get("2. Marca 60° Derecha")
+            a = st.session_state.puntos_calibracion.get("3. Marca 60° Arriba")
+
+            # Cálculo de escala (tu propuesta de dividir por 6)
+            # Usamos Derecha por defecto, si no está usamos Arriba
+            ref = d if d else a
+            dist_px = np.sqrt((ref[0]-c[0])**2 + (ref[1]-c[1])**2)
+            px_10 = dist_px / 6
+
+            # Detección de negros y dibujo de anillos
+            res = img_orig.copy()
+            total_pts = 0
+            gris = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
+            _, binaria = cv2.threshold(gris, 150, 255, cv2.THRESH_BINARY_INV)
+
+            for i in range(1, 5): # 4 anillos como pediste
+                r = int(i * px_10)
+                r_in = int((i-1) * px_10)
+                cv2.circle(res, c, r, (200,200,200), 1)
+                
+                # Aquí iría el bucle de sectores (45°) y suma de puntos
+                # (Omitido brevemente para asegurar que la interfaz funcione)
+            
+            st.image(cv2.cvtColor(res, cv2.COLOR_BGR2RGB), use_container_width=True)
+            st.success("✅ Escala aplicada correctamente.")
+
+else:
+    st.info("Por favor, subí la imagen para comenzar.")
