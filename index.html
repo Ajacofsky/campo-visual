@@ -1,65 +1,60 @@
 import streamlit as st
-import numpy as np
 import cv2
-from matplotlib import pyplot as plt
+import numpy as np
+import matplotlib.pyplot as plt
 
-st.set_page_config(layout="wide", page_title="Peritaje Pro V30")
-st.title("⚖️ Calibración por Gráfico de Precisión (Matplotlib)")
+st.set_page_config(layout="wide")
+st.title("⚖️ Sistema de Peritaje - Calibración Vectorial")
 
-img_file = st.sidebar.file_uploader("Subir Informe", type=['jpg', 'png', 'jpeg'])
+file = st.sidebar.file_uploader("Subir Informe", type=['jpg', 'png', 'jpeg'])
 
-if img_file:
-    # 1. CARGA DE IMAGEN
-    file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
+if file:
+    # 1. Cargar imagen y convertir a RGB (importante para que no cambien los colores)
+    file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # Convertimos a RGB para Matplotlib
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     h, w, _ = img.shape
 
-    # 2. CONTROLES DE POSICIÓN (Basados en proporción 0-100 para evitar errores de píxel)
-    st.sidebar.header("🎯 1. Ubicar Centro")
-    cx = st.sidebar.slider("Centro Horizontal %", 0, 100, 50) / 100 * w
-    cy = st.sidebar.slider("Centro Vertical %", 0, 100, 50) / 100 * h
-
-    st.sidebar.header("📏 2. Ajustar Marca 60°")
-    # Movemos este slider hasta que el círculo exterior pise el '60' del papel
-    ancla_60 = st.sidebar.slider("Radio hasta Marca 60°", 10, w//2, 200)
-
-    # MATEMÁTICA PURA: Dividimos el radio del 60 en 6 partes iguales
-    radio_paso = ancla_60 / 6.0
-
-    # 3. CREACIÓN DEL GRÁFICO (Nueva Perspectiva)
-    fig, ax = plt.subplots(figsize=(10, 10))
+    # 2. Controles laterales
+    st.sidebar.header("🎯 Ajuste Manual")
+    cx = st.sidebar.slider("Centro X", 0, w, w // 2)
+    cy = st.sidebar.slider("Centro Y", 0, h, h // 2)
     
-    # Mostramos la imagen de fondo
-    ax.imshow(img)
+    # Este slider controla el radio total (Marca 60)
+    radio_60 = st.sidebar.slider("Radio hasta la marca 60°", 50, w // 2, 200)
 
-    # Dibujamos los anillos CON MATPLOTLIB (Líneas vectoriales, no píxeles)
-    # Dibujamos 6 anillos equidistantes
+    # 3. Crear el gráfico con Matplotlib (Esto garantiza el color ROJO)
+    fig, ax = plt.subplots(figsize=(12, 12))
+    ax.imshow(img) # La imagen de fondo
+
+    # MATEMÁTICA: Dibujamos 6 anillos equidistantes (10, 20, 30, 40, 50, 60)
+    # El radio de cada uno es (Radio_60 / 6) * i
+    paso = radio_60 / 6.0
+
     for i in range(1, 7):
-        radio = i * radio_paso
-        circulo = plt.Circle((cx, cy), radio, color='red', fill=False, linewidth=3, alpha=0.9)
+        # Dibujamos círculos ROJOS INTENSOS
+        circulo = plt.Circle((cx, cy), i * paso, color='red', fill=False, linewidth=3.5)
         ax.add_patch(circulo)
-        # Etiqueta de grado
-        ax.text(cx + radio, cy, f"{i*10}°", color='red', fontsize=10, fontweight='bold')
+        # Etiquetas de grado para que no haya duda
+        ax.text(cx + (i * paso), cy, f"{i*10}°", color='red', weight='bold', fontsize=12)
 
-    # Dibujamos los ejes radiales (cada 45°)
-    for angulo in range(0, 360, 45):
-        rad = np.radians(angulo)
-        x_fin = cx + (ancla_60) * np.cos(rad)
-        y_fin = cy + (ancla_60) * np.sin(rad)
-        ax.plot([cx, x_fin], [cy, y_fin], color='red', lw=1.5, alpha=0.7)
+    # Dibujamos los ejes radiales cada 45 grados
+    for ang in range(0, 360, 45):
+        rad = np.radians(ang)
+        ax.plot([cx, cx + radio_60 * np.cos(rad)], 
+                [cy, cy + radio_60 * np.sin(rad)], 
+                color='red', lw=1.5, linestyle='--')
 
-    # Marca del centro
-    ax.plot(cx, cy, 'r+', markersize=20, markeredgewidth=3)
+    # Cruz del centro
+    ax.plot(cx, cy, 'r+', markersize=25, markeredgewidth=4)
 
-    # Estética del gráfico
-    ax.axis('off') # Ocultar ejes de coordenadas de la foto
-    plt.tight_layout(pad=0)
+    # Configuración de visualización
+    ax.axis('off')
+    plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
 
-    # 4. MOSTRAR EN STREAMLIT
+    # 4. Mostrar en Streamlit
     st.pyplot(fig)
-    
-    st.success(f"Equidistancia: {round(radio_paso, 2)} unidades entre anillos.")
 
+    st.success(f"Grilla calibrada: Cada anillo está separado por {round(paso, 2)} píxeles exactos.")
 else:
-    st.info("Subí la imagen para generar la grilla vectorial roja.")
+    st.warning("Por favor, subí la imagen para ver la grilla roja.")
