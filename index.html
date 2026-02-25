@@ -1,57 +1,56 @@
 import streamlit as st
-import numpy as np
 import cv2
+import numpy as np
 
-st.set_page_config(layout="wide")
-st.title("⚖️ Calibración de Píxeles - Rojo Absoluto")
+st.set_page_config(layout="wide", page_title="Corrección Final")
 
-file = st.sidebar.file_uploader("Subir Informe", type=['jpg', 'png', 'jpeg'])
+# Título para confirmar que el código cambió
+st.title("🔴 Calibrador de Anillos ROJOS Equidistantes")
+
+file = st.sidebar.file_uploader("Subir Campo Visual", type=['jpg', 'png', 'jpeg'])
 
 if file:
-    # 1. CARGA DE IMAGEN
+    # 1. Cargar imagen original
     file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
     h, w = img.shape[:2]
 
-    # 2. CONTROLES DE PRECISIÓN
-    st.sidebar.header("🎯 Ajustes")
-    cx = st.sidebar.slider("Centro X", 0, w, w // 2)
-    cy = st.sidebar.slider("Centro Y", 0, h, h // 2)
+    # 2. Controles con nombres NUEVOS (Si no ves estos nombres, no estás en el código nuevo)
+    st.sidebar.header("⚙️ AJUSTE DE PRECISIÓN")
+    centro_x = st.sidebar.slider("Posición Centro X", 0, w, w // 2)
+    centro_y = st.sidebar.slider("Posición Centro Y", 0, h, h // 2)
     
-    # Este slider define el 60°
-    x60 = st.sidebar.slider("Alinear con Marca 60°", cx, w, cx + 200)
+    # Este es el slider clave para la equidistancia
+    marca_60 = st.sidebar.slider("Llevar círculo exterior a Marca 60°", centro_x, w, centro_x + 200)
+
+    # MATEMÁTICA: Calculamos el radio total y lo dividimos en 6 partes iguales
+    distancia_total = float(marca_60 - centro_x)
+    paso_10_grados = distancia_total / 6.0
+
+    # 3. DIBUJO DIRECTO SOBRE LA IMAGEN
+    # Usamos (0, 0, 255) que es ROJO PURO en OpenCV (BGR)
+    img_dibujo = img.copy()
     
-    # EQUIDISTANCIA MATEMÁTICA
-    dist_total = float(x60 - cx)
-    paso = dist_total / 6.0
-
-    # 3. MODIFICACIÓN DE LA MATRIZ (Pintar Rojo sobre los píxeles)
-    # Creamos una copia para no dañar la original
-    canvas = img.copy()
-    rojo_neon = [0, 0, 255]  # BGR para Rojo Puro en OpenCV
-
-    # Dibujamos los 6 anillos equidistantes
     for i in range(1, 7):
-        radio = int(i * paso)
-        # Dibujamos el círculo directamente en la matriz de la imagen
-        # Grosor 5 para máxima visibilidad
-        cv2.circle(canvas, (cx, cy), radio, rojo_neon, 5)
+        radio_actual = int(i * paso_10_grados)
+        # Dibujamos el anillo con grosor 5 para que sea imposible no verlo
+        cv2.circle(img_dibujo, (centro_x, centro_y), radio_actual, (0, 0, 255), 5)
         
-        # Ponemos el texto de los grados
-        cv2.putText(canvas, f"{i*10} deg", (cx + radio + 5, cy - 10), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, rojo_neon, 2)
+        # Etiqueta de grados
+        cv2.putText(img_dibujo, f"{i*10} deg", (centro_x + radio_actual, centro_y - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-    # Ejes Cartesianos
-    cv2.line(canvas, (cx, 0), (cx, h), rojo_neon, 2)
-    cv2.line(canvas, (0, cy), (w, cy), rojo_neon, 2)
+    # Ejes en rojo
+    cv2.line(img_dibujo, (centro_x, 0), (centro_x, h), (0, 0, 255), 2)
+    cv2.line(img_dibujo, (0, centro_y), (w, centro_y), (0, 0, 255), 2)
 
-    # 4. CONVERSIÓN FINAL PARA STREAMLIT
-    # Pasamos de BGR (OpenCV) a RGB (Streamlit/Web)
-    img_final = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+    # 4. CONVERSIÓN DE COLOR Y MUESTRA
+    # ¡CRÍTICO! Convertimos de BGR a RGB para que Streamlit NO lo muestre negro o azul
+    img_rgb = cv2.cvtColor(img_dibujo, cv2.COLOR_BGR2RGB)
     
-    st.image(img_final, use_container_width=True)
+    st.image(img_rgb, use_container_width=True, caption="Si ves líneas rojas, la calibración es exitosa")
     
-    st.sidebar.success(f"Configuración aplicada: {round(paso, 1)} px por cada 10°")
+    st.sidebar.info(f"Cada anillo está a {round(paso_10_grados, 2)}px del anterior.")
 
 else:
-    st.info("Subí la imagen para forzar el renderizado en rojo.")
+    st.warning("Esperando imagen...")
