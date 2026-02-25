@@ -2,8 +2,8 @@ import streamlit as st
 import cv2
 import numpy as np
 
-st.set_page_config(layout="wide", page_title="Peritaje Pro V20")
-st.title("⚖️ Analizador de Incapacidad - Visualización Mejorada")
+st.set_page_config(layout="wide", page_title="Peritaje Pro V21")
+st.title("⚖️ Analizador de Incapacidad - Grilla de Alto Contraste")
 
 img_file = st.sidebar.file_uploader("1. Subir Campo Visual", type=['jpg', 'png', 'jpeg'])
 
@@ -12,15 +12,17 @@ if img_file:
     img_orig = cv2.imdecode(file_bytes, 1)
     h, w = img_orig.shape[:2]
 
-    # --- CONTROLES ---
-    st.sidebar.subheader("🎯 Posicionamiento")
-    cx = st.sidebar.slider("Centro X", 0, w, w // 2)
-    cy = st.sidebar.slider("Centro Y", 0, h, h // 2)
-    px_cada_10 = st.sidebar.slider("Tamaño Grilla (Pix/10°)", 10, 150, 55)
+    # --- CONTROLES DE PRECISIÓN ---
+    st.sidebar.subheader("🎯 Ajuste de Posición")
+    cx = st.sidebar.slider("Centro Horizontal (X)", 0, w, w // 2)
+    cy = st.sidebar.slider("Centro Vertical (Y)", 0, h, h // 2)
     
-    st.sidebar.subheader("🔬 Detección")
+    st.sidebar.subheader("📏 Ajuste de Escala")
+    px_cada_10 = st.sidebar.slider("Tamaño Grilla (Pixeles/10°)", 10, 150, 55)
+    
+    st.sidebar.subheader("🔬 Detección y Color")
     umbral = st.sidebar.slider("Sensibilidad de Negros", 50, 255, 145)
-    opacidad = st.sidebar.slider("Opacidad de Colores", 0.1, 1.0, 0.5)
+    opacidad = st.sidebar.slider("Intensidad de Color (Resaltado)", 0.1, 1.0, 0.4)
 
     # --- PROCESAMIENTO ---
     gris = cv2.cvtColor(img_orig, cv2.COLOR_BGR2GRAY)
@@ -29,15 +31,18 @@ if img_file:
     img_res = img_orig.copy()
     puntos_totales = 0
 
-    # Dibujamos de afuera hacia adentro para que el centro quede "arriba"
+    # Dibujamos 4 anillos (10°, 20°, 30°, 40°)
     for i in range(1, 5):
         r_ext = i * px_cada_10
         r_int = (i - 1) * px_cada_10
         
         for s in range(8):
-            ang = s * 45
+            ang_deg = s * 45
+            ang_rad = np.radians(ang_deg)
+            
+            # Máscara para análisis
             mask = np.zeros((h, w), dtype=np.uint8)
-            cv2.ellipse(mask, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, 255, -1)
+            cv2.ellipse(mask, (cx, cy), (r_ext, r_ext), 0, ang_deg, ang_deg + 45, 255, -1)
             cv2.circle(mask, (cx, cy), int(r_int), 0, -1)
             
             # Conteo de masa sólida
@@ -48,33 +53,32 @@ if img_file:
                 ocupacion = (area_negra / area_total) * 100
                 color, pts = None, 0
                 
-                if ocupacion >= 8: # Amarillo (10 pts)
+                if ocupacion >= 8: # Cuadrado sólido (Amarillo)
                     color, pts = (0, 255, 255), 10 
-                elif 1.2 < ocupacion < 8: # Celeste (5 pts)
+                elif 1.2 < ocupacion < 8: # Punto o borde (Celeste)
                     color, pts = (255, 255, 0), 5
                 
                 if color:
                     puntos_totales += pts
                     overlay = img_res.copy()
-                    cv2.ellipse(overlay, (cx, cy), (r_ext, r_ext), 0, ang, ang + 45, color, -1)
+                    cv2.ellipse(overlay, (cx, cy), (r_ext, r_ext), 0, ang_deg, ang_deg + 45, color, -1)
                     cv2.circle(overlay, (cx, cy), int(r_int), (255,255,255), -1)
                     img_res = cv2.addWeighted(overlay, opacidad, img_res, 1 - opacidad, 0)
 
-            # --- DIBUJAR BORDES NEGROS FUERTES ---
-            # Líneas radiales (divisiones de 45°)
-            x_line = int(cx + r_ext * np.cos(np.radians(ang)))
-            y_line = int(cy + r_ext * np.sin(np.radians(ang)))
-            cv2.line(img_res, (cx, cy), (x_line, y_line), (0, 0, 0), 2) # Línea negra gruesa
+            # --- DIBUJAR LÍNEAS RADIALES NEGRAS ---
+            x_fin = int(cx + r_ext * np.cos(ang_rad))
+            y_fin = int(cy + r_ext * np.sin(ang_rad))
+            cv2.line(img_res, (cx, cy), (x_fin, y_fin), (0, 0, 0), 2)
 
-        # Círculo del anillo en negro fuerte
-        cv2.circle(img_res, (cx, cy), int(r_ext), (0, 0, 0), 2)
+        # --- DIBUJAR ANILLOS NEGROS GRUESOS ---
+        cv2.circle(img_res, (cx, cy), int(r_ext), (0, 0, 0), 3) # Grosor 3 para máxima visibilidad
 
-    # Marca del Centro (0,0) reforzada
-    cv2.drawMarker(img_res, (cx, cy), (0, 0, 255), cv2.MARKER_CROSS, 50, 3)
+    # Centro de mira reforzado
+    cv2.drawMarker(img_res, (cx, cy), (0, 0, 255), cv2.MARKER_CROSS, 60, 3)
 
-    # --- RESULTADOS ---
+    # --- INTERFAZ DE RESULTADOS ---
     st.subheader(f"📊 Suma: {puntos_totales} pts | Incapacidad: {round((puntos_totales/320)*100, 1)}%")
     st.image(cv2.cvtColor(img_res, cv2.COLOR_BGR2RGB), use_container_width=True)
 
 else:
-    st.info("Subí la imagen para ver la grilla reforzada.")
+    st.info("Subí la imagen para ver la grilla de alto contraste.")
